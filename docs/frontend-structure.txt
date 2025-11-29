@@ -1,0 +1,52 @@
+.
+├── bun.lockb
+├── components.json
+├── docs
+│   ├── FRONTEND_INTEGRATION.md
+│   ├── frontend-whatsapp-context-updated.tsx
+│   └── MESSAGING_API.md
+├── eslint.config.js
+├── frontend-structure.txt
+├── index.html
+├── package-lock.json
+├── package.json
+├── pnpm-lock.yaml
+├── postcss.config.js
+├── public
+│   ├── favicon.ico
+│   ├── placeholder.svg
+│   └── robots.txt
+├── README.md
+├── src
+│   ├── App.css
+│   ├── App.tsx
+│   ├── components
+│   │   ├── auth
+│   │   ├── chat
+│   │   └── ui
+│   ├── context
+│   │   └── WhatsappProvider.tsx
+│   ├── hooks
+│   │   ├── use-mobile.tsx
+│   │   ├── use-toast.ts
+│   │   ├── useMessaging.ts
+│   │   └── useWhatsapp.ts
+│   ├── index.css
+│   ├── lib
+│   │   └── utils.ts
+│   ├── main.tsx
+│   ├── pages
+│   │   ├── Chat.tsx
+│   │   ├── Index.tsx
+│   │   ├── Login.tsx
+│   │   └── NotFound.tsx
+│   ├── types
+│   │   └── chat.ts
+│   └── vite-env.d.ts
+├── tailwind.config.ts
+├── tsconfig.app.json
+├── tsconfig.json
+├── tsconfig.node.json
+└── vite.config.ts
+
+13 directories, 37 files

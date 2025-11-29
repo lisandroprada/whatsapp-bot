@@ -15,6 +15,15 @@ export class Message extends Document {
   @Prop()
   content: string;
 
+  @Prop()
+  fileName?: string;
+
+  @Prop()
+  fileSize?: number;
+
+  @Prop()
+  mimeType?: string;
+
   @Prop({ required: true })
   timestamp: Date;
 }

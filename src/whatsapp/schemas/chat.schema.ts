@@ -14,6 +14,15 @@ export class Chat extends Document {
 
   @Prop({ type: Object })
   lastMessage: object;
+
+  @Prop({ default: true })
+  isBotActive: boolean; // Permite activar/desactivar bot en este chat
+
+  @Prop({ default: null })
+  coreClientId: string; // ID del cliente en Core Backend (null = no registrado)
+
+  @Prop({ default: 'BOT', enum: ['BOT', 'HUMAN'] })
+  mode: string; // Modo actual: BOT = bot responde, HUMAN = solo humano
 }
 
 export const ChatSchema = SchemaFactory.createForClass(Chat);
