@@ -1,7 +1,7 @@
 // Test directo de Gemini 2.5 Flash
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const apiKey = 'AIzaSyA9EIEToBDy1tDCOW0SW9ZdaN7c79nw488';
+const apiKey = process.env.GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(apiKey);
 
 async function test() {

@@ -461,7 +461,7 @@ Response 400:
 
 ```bash
 # Gemini AI
-GEMINI_API_KEY=AIzaSyA9EIEToBDy1tDCOW0SW9ZdaN7c79nw488
+GEMINI_API_KEY=your_api_key_here
 
 # Core Backend Integration
 CORE_BACKEND_URL=http://localhost:4000
