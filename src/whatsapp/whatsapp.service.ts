@@ -578,7 +578,13 @@ export class WhatsappService implements OnModuleInit {
     );
 
     // 4. Emitir evento WebSocket para que el frontend se actualice
-    this.whatsappGateway.sendNewMessage(message.toJSON());
+    const messageData = message.toJSON();
+    this.logger.log(`[WebSocket] Emitting new-message event:`, {
+      jid: messageData.jid,
+      fromMe: messageData.fromMe,
+      content: messageData.content?.substring(0, 50),
+    });
+    this.whatsappGateway.sendNewMessage(messageData);
 
     this.logger.log(`[Manual] Message sent to ${to} via operator/API`);
 
@@ -664,6 +670,23 @@ export class WhatsappService implements OnModuleInit {
 
   async getChats() {
     return this.chatModel.find().sort({ 'lastMessage.timestamp': -1 }).lean();
+  }
+
+  async getProfilePicture(jid: string): Promise<string | null> {
+    try {
+      if (!this.sock) {
+        throw new Error('WhatsApp socket not initialized');
+      }
+      
+      // Ensure JID is in correct format
+      const formattedJid = jid.includes('@s.whatsapp.net') ? jid : `${jid}@s.whatsapp.net`;
+      
+      const ppUrl = await this.sock.profilePictureUrl(formattedJid, 'image');
+      return ppUrl;
+    } catch (error) {
+      this.logger.warn(`Could not fetch profile picture for ${jid}: ${error.message}`);
+      return null;
+    }
   }
 
   async getMessages(jid: string) {

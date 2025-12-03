@@ -72,4 +72,10 @@ export class WhatsappController {
   getMessages(@Param('jid') jid: string) {
     return this.whatsappService.getMessages(jid);
   }
+
+  @Get('contact/:jid/profile-picture')
+  @UseGuards(ApiKeyGuard)
+  getProfilePicture(@Param('jid') jid: string) {
+    return this.whatsappService.getProfilePicture(jid);
+  }
 }
