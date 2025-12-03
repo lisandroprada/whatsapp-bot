@@ -284,6 +284,31 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
+  async markAsRead(jid: string) {
+    try {
+      this.logger.log(`[markAsRead] Attempting to mark as read: ${jid}`);
+      
+      // 1. Update database
+      const result = await this.chatModel.updateOne({ jid }, { $set: { unreadCount: 0 } });
+      
+      this.logger.log(`[markAsRead] Update result for ${jid}: matched=${result.matchedCount}, modified=${result.modifiedCount}`);
+
+      // 2. Send read receipt to WhatsApp (optional but good practice)
+      // This requires knowing the message IDs to mark as read, which is complex.
+      // For now, we just reset the counter in our DB.
+      // If we wanted to be thorough, we'd need to track unread message IDs.
+      
+      // 3. Notify frontend via gateway
+      // We can send a chat update event
+      // this.whatsappGateway.server.emit('chat-update', { jid, unreadCount: 0 });
+
+      return { success: true, result };
+    } catch (error) {
+      this.logger.error(`Error marking chat as read: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  }
+
   /**
    * Procesar mensaje usando BrainService
    */
@@ -684,6 +709,12 @@ export class WhatsappService implements OnModuleInit {
       const ppUrl = await this.sock.profilePictureUrl(formattedJid, 'image');
       return ppUrl;
     } catch (error) {
+      // 401/404 are expected for contacts without profile picture or privacy settings
+      if (error?.data === 401 || error?.data === 404) {
+        // this.logger.debug(`No profile picture for ${jid} (Privacy/None)`);
+        return null;
+      }
+      
       this.logger.warn(`Could not fetch profile picture for ${jid}: ${error.message}`);
       return null;
     }
