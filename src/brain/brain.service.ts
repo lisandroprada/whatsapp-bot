@@ -8,7 +8,8 @@ import {
 } from '@google/generative-ai';
 import { Message } from '../whatsapp/schemas/message.schema';
 import { Chat } from '../whatsapp/schemas/chat.schema';
-import { getSystemPrompt } from './prompts/system-prompt';
+import { AiConfig } from './schemas/ai-config.schema';
+import { getSystemPrompt, SYSTEM_PROMPT_BASE } from './prompts/system-prompt';
 import { AccountStatusTool } from './tools/account-status.tool';
 import { CreateComplaintTool } from './tools/create-complaint.tool';
 import { VerifyIdentityTool } from './tools/verify-identity.tool';
@@ -35,6 +36,7 @@ export class BrainService {
   constructor(
     @InjectModel(Message.name) private readonly messageModel: Model<Message>,
     @InjectModel(Chat.name) private readonly chatModel: Model<Chat>,
+    @InjectModel(AiConfig.name) private readonly aiConfigModel: Model<AiConfig>,
     private readonly configService: ConfigService,
     private readonly accountStatusTool: AccountStatusTool,
     private readonly createComplaintTool: CreateComplaintTool,
@@ -128,7 +130,21 @@ export class BrainService {
 
       // 2. Construir historial y prompt
       const history = await this.getChatHistory(jid);
-      const systemPrompt = getSystemPrompt(isRegistered, clientName);
+      
+      // Obtener prompt base dinámico (desde DB o default)
+      const basePrompt = await this.getStoredSystemPrompt();
+      
+      // Construir contexto de usuario
+      let userContext = '';
+      if (isRegistered && clientName) {
+        userContext = `\n### CURRENT USER CONTEXT\nUsuario: **${clientName}**\nEstado: CLIENTE REGISTRADO ✅\nPermisos: Puede acceder a información de saldo, pagos, contratos y reclamos.\n`;
+      } else if (isRegistered && !clientName) {
+        userContext = `\n### CURRENT USER CONTEXT\nEstado: CLIENTE REGISTRADO ✅\nPermisos: Puede acceder a información administrativa.\n`;
+      } else {
+        userContext = `\n### CURRENT USER CONTEXT\nEstado: INVITADO (No Registrado) ⚠️\nRestricciones: NO puede acceder a datos sensibles. Debe validar identidad primero.\n`;
+      }
+
+      const systemPrompt = basePrompt + userContext;
 
       const chat = model.startChat({
         history: [
@@ -273,6 +289,68 @@ export class BrainService {
     } catch (error) {
       this.logger.error('Error retrieving chat history:', error);
       return [];
+    }
+  }
+
+  /**
+   * Obtener el System Prompt almacenado en DB o el default
+   */
+  async getStoredSystemPrompt(): Promise<string> {
+    try {
+      const config = await this.aiConfigModel.findOne({ key: 'system_prompt_rules' });
+      return config ? config.value : SYSTEM_PROMPT_BASE;
+    } catch (error) {
+      this.logger.error('Error fetching stored system prompt:', error);
+      return SYSTEM_PROMPT_BASE;
+    }
+  }
+
+  /**
+   * Actualizar el System Prompt en DB
+   */
+  async updateSystemPrompt(prompt: string, updatedBy: string = 'admin'): Promise<AiConfig> {
+    return this.aiConfigModel.findOneAndUpdate(
+      { key: 'system_prompt_rules' },
+      { value: prompt, updatedBy },
+      { upsert: true, new: true }
+    );
+  }
+
+  /**
+   * Revisar el prompt propuesto con IA
+   */
+  async reviewPrompt(prompt: string): Promise<string> {
+    try {
+      const model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      
+      const reviewPrompt = `
+      Actúa como un experto en Prompt Engineering y Seguridad de IA.
+      Revisa el siguiente System Prompt propuesto para un bot inmobiliario.
+      
+      Analiza:
+      1. Claridad de instrucciones.
+      2. Tono adecuado (profesional pero cercano).
+      3. Posibles conflictos o ambigüedades.
+      4. Seguridad (que no incite a revelar datos sensibles sin validación).
+      
+      PROMPT PROPUESTO:
+      """
+      ${prompt}
+      """
+      
+      Devuelve un breve reporte con:
+      - Puntos Fuertes
+      - Riesgos Detectados (si los hay)
+      - Sugerencias de Mejora
+      
+      Si el prompt es seguro y bueno, confírmalo.
+      `;
+
+      const result = await model.generateContent(reviewPrompt);
+      return result.response.text();
+    } catch (error) {
+      this.logger.error('Error reviewing prompt:', error);
+      throw new Error('Failed to review prompt with AI');
     }
   }
 }

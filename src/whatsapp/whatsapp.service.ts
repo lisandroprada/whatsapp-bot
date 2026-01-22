@@ -12,7 +12,7 @@ import makeWASocket, {
 import { initAuthCreds } from '@whiskeysockets/baileys/lib/Utils/auth-utils';
 import { Boom } from '@hapi/boom';
 import * as qrcode from 'qrcode';
-import { writeFileSync } from 'fs';
+import * as fs from 'fs';
 import { join } from 'path';
 
 import { WhatsappSession } from './schemas/session.schema';
@@ -26,7 +26,7 @@ import { CoreBackendService } from '../brain/services/core-backend.service';
 @Injectable()
 export class WhatsappService implements OnModuleInit {
   private sock: any;
-  private status: string = 'closed';
+  private status: string = 'close';
   private qr: string = '';
   private qrBase64: string = '';
   private readonly logger = new Logger(WhatsappService.name);
@@ -48,63 +48,65 @@ export class WhatsappService implements OnModuleInit {
   }
 
   async connect() {
-    if (this.status === 'open' || this.status === 'connecting') {
-      this.whatsappGateway.sendLog('Connection already in progress or open.');
-      return { status: this.status };
+    try {
+      if (this.status === 'open' || this.status === 'connecting') {
+        this.logger.log('Connection already in progress or open.');
+        return { status: this.status };
+      }
+      this.status = 'connecting';
+      this.whatsappGateway.sendStatus(this.status);
+      this.whatsappGateway.sendLog('Starting connection...');
+      this.logger.log('Starting connection attempt...');
+
+      const { state, saveCreds } = await this.getAuthState();
+
+      const pinoLogger = {
+        level: 'error',
+        trace: () => {},
+        debug: () => {},
+        info: () => {},
+        warn: (msg: any) => this.logger.warn(`[Baileys Warn] ${msg}`),
+        error: (msg: any) => this.logger.error(`[Baileys Error] ${msg}`),
+        fatal: (msg: any) => this.logger.error(`[Baileys Fatal] ${msg}`),
+        child: () => pinoLogger,
+      };
+
+      // Forzar una versión estable si falla la detección automática
+      let version: any = [2, 3000, 1015901307]; // Fallback version
+      try {
+        const remoteVersion = await fetchLatestBaileysVersion();
+        version = remoteVersion.version;
+        this.logger.log(`Using WA v${version.join('.')}`);
+      } catch (e) {
+        this.logger.warn(`Failed to fetch latest version, using fallback. Error: ${e.message}`);
+      }
+      
+      this.sock = makeWASocket({
+        version,
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, pinoLogger as any),
+        },
+        printQRInTerminal: false,
+        logger: pinoLogger as any,
+      });
+
+      this.sock.ev.on(
+        'connection.update',
+        (update: any) => {
+          this.logger.log(`[ConnectionUpdate] ${JSON.stringify(update)}`);
+          this.handleConnectionUpdate(update);
+        },
+      );
+      this.sock.ev.on('creds.update', saveCreds);
+      this.sock.ev.on('messages.upsert', this.handleMessagesUpsert.bind(this));
+
+      return { status: 'connecting' };
+    } catch (error) {
+      this.logger.error(`[Connect ERROR] ${error.message}`);
+      this.status = 'close';
+      return { status: 'error', message: error.message };
     }
-    this.status = 'connecting';
-    this.whatsappGateway.sendStatus(this.status);
-    this.whatsappGateway.sendLog('Starting connection...');
-
-    const { state, saveCreds } = await this.getAuthState();
-
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    this.whatsappGateway.sendLog(
-      `Using WA v${version.join('.')}, isLatest: ${isLatest}`,
-    );
-
-    this.sock = makeWASocket({
-      version,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, {
-          trace: (msg: any) => this.logger.verbose(msg),
-          debug: (msg: any) => this.logger.debug(msg),
-          info: (msg: any) => this.logger.log(msg),
-          warn: (msg: any) => this.logger.warn(msg),
-          error: (msg: any) => this.logger.error(msg),
-          fatal: (msg: any) => this.logger.error(msg),
-        } as any),
-      },
-      logger: {
-        ...this.logger,
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        child: (_bindings: any) => ({
-          ...this.logger,
-          trace: (msg: any) => this.logger.verbose(msg),
-          debug: (msg: any) => this.logger.debug(msg),
-          info: (msg: any) => this.logger.log(msg),
-          warn: (msg: any) => this.logger.warn(msg),
-          error: (msg: any) => this.logger.error(msg),
-          fatal: (msg: any) => this.logger.error(msg),
-        }),
-        trace: (msg: any) => this.logger.verbose(msg),
-        debug: (msg: any) => this.logger.debug(msg),
-        info: (msg: any) => this.logger.log(msg),
-        warn: (msg: any) => this.logger.warn(msg),
-        error: (msg: any) => this.logger.error(msg),
-        fatal: (msg: any) => this.logger.error(msg),
-      } as any,
-    });
-
-    this.sock.ev.on(
-      'connection.update',
-      this.handleConnectionUpdate.bind(this),
-    );
-    this.sock.ev.on('creds.update', saveCreds);
-    this.sock.ev.on('messages.upsert', this.handleMessagesUpsert.bind(this));
-
-    return { status: 'connecting' };
   }
 
   private async handleMessagesUpsert(m: any) {
@@ -156,7 +158,7 @@ export class WhatsappService implements OnModuleInit {
           `media_${Date.now()}.${fileExtension}`;
         const fileName = `${Date.now()}.${fileExtension}`;
         const filePath = join(process.cwd(), 'public', 'media', fileName);
-        writeFileSync(filePath, mediaBuffer as Buffer);
+        fs.writeFileSync(filePath, mediaBuffer as Buffer);
         content = `/media/${fileName}`;
         
         // Store metadata for frontend
@@ -474,12 +476,17 @@ export class WhatsappService implements OnModuleInit {
         );
         creds = parsedSession.creds;
         keys = parsedSession.keys || {};
+        keys = parsedSession.keys || {};
         this.whatsappGateway.sendLog('Credentials loaded from database.');
+        fs.appendFileSync('debug.log', `[${new Date().toISOString()}] Credentials loaded from database. Keys types: ${Object.keys(keys).join(', ')}\n`);
       } catch (error) {
         this.whatsappGateway.sendLog(
           'Failed to parse stored credentials, starting fresh',
         );
+        fs.appendFileSync('debug.log', `[${new Date().toISOString()}] Failed to parse stored credentials: ${error.message}\n`);
       }
+    } else {
+        fs.appendFileSync('debug.log', `[${new Date().toISOString()}] No session found in database for ${this.instanceName}\n`);
     }
 
     // If no valid credentials found, initialize new ones
@@ -536,8 +543,11 @@ export class WhatsappService implements OnModuleInit {
 
   private async handleConnectionUpdate(update: any) {
     const { connection, lastDisconnect, qr } = update;
+    fs.appendFileSync('debug.log', `[${new Date().toISOString()}] Connection Update: ${JSON.stringify(update)}\n`);
+    
     if (qr) {
       this.qr = qr;
+      this.logger.log('New QR code generated');
       this.whatsappGateway.sendLog('QR code generated. Scan with WhatsApp.');
       qrcode.toDataURL(qr, (err, url) => {
         if (err) {
@@ -545,75 +555,111 @@ export class WhatsappService implements OnModuleInit {
           return;
         }
         // Extract base64 part from data URL
-        this.qrBase64 = url.split(',')[1] || '';
+        const base64 = url.split(',')[1] || '';
+        this.qrBase64 = base64;
         this.whatsappGateway.sendQrCode(url);
+        this.logger.log('QR base64 updated in state');
       });
     }
 
     if (connection) {
       this.status = connection;
       this.whatsappGateway.sendStatus(this.status);
+      this.logger.log(`Connection status updated: ${connection}`);
     }
 
     if (connection === 'close') {
-      const shouldReconnect =
-        (lastDisconnect.error as Boom)?.output?.statusCode !==
-        DisconnectReason.loggedOut;
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      
+      this.logger.error(`Connection closed. Status code: ${statusCode}. Error: ${lastDisconnect?.error}`);
       this.whatsappGateway.sendLog(
-        `Connection closed due to ${lastDisconnect.error}, reconnecting: ${shouldReconnect}`,
+        `Connection closed (Code: ${statusCode}). Reconnecting: ${shouldReconnect}`,
       );
+
       if (shouldReconnect) {
+        // Si no fue un logout manual, intentamos reconectar
         setTimeout(() => this.connect(), 5000);
+      } else {
+        // Si fue logout, limpiamos todo
+        this.qr = '';
+        this.qrBase64 = '';
+        this.logger.log('Logged out detected, clearing credentials from DB');
+        this.sessionModel.deleteOne({ instanceName: this.instanceName }).exec()
+          .then(() => this.whatsappGateway.sendLog('Session expired and cleared. Please scan again.'));
       }
     } else if (connection === 'open') {
+      this.qr = '';
+      this.qrBase64 = '';
       this.whatsappGateway.sendLog('Connection opened successfully.');
+      this.logger.log('Connection opened successfully. QR cleared.');
     }
   }
 
   getStatus() {
-    return { status: this.status, qr: this.qrBase64 };
+    return { 
+      status: this.status, 
+      qr: this.qrBase64,
+      hasQr: !!this.qrBase64 
+    };
   }
 
   async sendText(to: string, text: string) {
-    if (this.status !== 'open') {
-      throw new Error('WhatsApp is not connected');
+    try {
+      this.logger.log(`[sendText] Initiated to ${to}. Current status: ${this.status}`);
+      
+      if (this.status !== 'open') {
+        throw new Error(`WhatsApp no está conectado (estado actual: ${this.status})`);
+      }
+
+      if (!this.sock) {
+        throw new Error('WhatsApp socket is not initialized');
+      }
+
+      const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+      this.logger.log(`[sendText] Resolved JID: ${jid}`);
+
+      // 1. Enviar mensaje por WhatsApp
+      await this.sock.sendMessage(jid, { text });
+      this.logger.log(`[sendText] Baileys sendMessage success for ${jid}`);
+
+      // 2. Guardar mensaje en MongoDB
+      const message = new this.messageModel({
+        jid,
+        fromMe: true,
+        type: 'conversation',
+        content: text,
+        timestamp: new Date(),
+      });
+
+      await message.save();
+      this.logger.log(`[sendText] Message saved to MongoDB for ${jid}`);
+
+      // 3. Actualizar último mensaje del chat
+      await this.chatModel.updateOne(
+        { jid: jid },
+        {
+          $set: { lastMessage: message },
+        },
+        { upsert: true },
+      );
+
+      // 4. Emitir evento WebSocket
+      const messageData = message.toJSON();
+      if (this.whatsappGateway && this.whatsappGateway.server) {
+        this.whatsappGateway.sendNewMessage(messageData);
+      } else {
+        this.logger.warn('[sendText] WhatsAppGateway not ready, skipping broadcast');
+      }
+
+      this.logger.log(`[Manual] Message sent to ${jid} via operator/API`);
+
+      return { success: true, message: messageData };
+    } catch (error) {
+      this.logger.error(`[sendText] Error: ${error.message}`, error.stack);
+      fs.appendFileSync('debug.log', `[${new Date().toISOString()}] sendText Error: ${error.message}\n${error.stack}\n`);
+      throw error;
     }
-
-    // 1. Enviar mensaje por WhatsApp
-    await this.sock.sendMessage(to, { text });
-
-    // 2. Guardar mensaje en MongoDB (fromMe: true porque lo envía el bot/operador)
-    const message = new this.messageModel({
-      jid: to,
-      fromMe: true,
-      type: 'conversation',
-      content: text,
-      timestamp: new Date(),
-    });
-
-    await message.save();
-
-    // 3. Actualizar último mensaje del chat
-    await this.chatModel.updateOne(
-      { jid: to },
-      {
-        $set: { lastMessage: message },
-      },
-      { upsert: true },
-    );
-
-    // 4. Emitir evento WebSocket para que el frontend se actualice
-    const messageData = message.toJSON();
-    this.logger.log(`[WebSocket] Emitting new-message event:`, {
-      jid: messageData.jid,
-      fromMe: messageData.fromMe,
-      content: messageData.content?.substring(0, 50),
-    });
-    this.whatsappGateway.sendNewMessage(messageData);
-
-    this.logger.log(`[Manual] Message sent to ${to} via operator/API`);
-
-    return { success: true, message: message.toJSON() };
   }
 
   async sendMediaUpload(
@@ -622,61 +668,81 @@ export class WhatsappService implements OnModuleInit {
     file: Express.Multer.File,
     mediaType: 'image' | 'video' | 'document',
   ) {
-    if (this.status !== 'open') {
-      throw new Error('WhatsApp is not connected');
+    try {
+      this.logger.log(`[sendMedia] Initiated to ${to}. Type: ${mediaType}. Status: ${this.status}`);
+      
+      if (this.status !== 'open') {
+        throw new Error(`WhatsApp is not connected (status: ${this.status})`);
+      }
+      if (!file) {
+        throw new Error('No file uploaded');
+      }
+      if (!this.sock) {
+        throw new Error('WhatsApp socket is not initialized');
+      }
+
+      const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+
+      // 1. Enviar media por WhatsApp
+      await this.sock.sendMessage(jid, {
+        [mediaType]: file.buffer,
+        mimetype: file.mimetype,
+        caption: caption,
+      });
+      this.logger.log(`[sendMedia] Baileys sendMedia success for ${jid}`);
+
+      // 2. Guardar archivo localmente
+      const fileName = `${Date.now()}_${file.originalname}`;
+      const filePath = join(process.cwd(), 'public', 'media', fileName);
+      fs.writeFileSync(filePath, file.buffer);
+
+      // 3. Guardar mensaje en MongoDB con metadata
+      const message = new this.messageModel({
+        jid,
+        fromMe: true,
+        type: `${mediaType}Message`,
+        content: `/media/${fileName}`,
+        fileName: file.originalname,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+        timestamp: new Date(),
+      });
+
+      await message.save();
+
+      // 4. Actualizar último mensaje del chat
+      await this.chatModel.updateOne(
+        { jid: jid },
+        {
+          $set: { lastMessage: message },
+        },
+        { upsert: true },
+      );
+
+      // 5. Emitir evento WebSocket
+      if (this.whatsappGateway && this.whatsappGateway.server) {
+        this.whatsappGateway.sendNewMessage(message.toJSON());
+      }
+
+      this.logger.log(`[Manual] Media sent to ${jid} via operator/API`);
+
+      return { success: true, message: message.toJSON() };
+    } catch (error) {
+      this.logger.error(`[sendMedia] Error: ${error.message}`, error.stack);
+      throw error;
     }
-    if (!file) {
-      throw new Error('No file uploaded');
-    }
-
-    // 1. Enviar media por WhatsApp
-    await this.sock.sendMessage(to, {
-      [mediaType]: file.buffer,
-      mimetype: file.mimetype,
-      caption: caption,
-    });
-
-    // 2. Guardar archivo localmente
-    const fileName = `${Date.now()}_${file.originalname}`;
-    const filePath = join(process.cwd(), 'public', 'media', fileName);
-    writeFileSync(filePath, file.buffer);
-
-    // 3. Guardar mensaje en MongoDB con metadata
-    const message = new this.messageModel({
-      jid: to,
-      fromMe: true,
-      type: `${mediaType}Message`,
-      content: `/media/${fileName}`,
-      fileName: file.originalname,
-      fileSize: file.size,
-      mimeType: file.mimetype,
-      timestamp: new Date(),
-    });
-
-    await message.save();
-
-    // 4. Actualizar último mensaje del chat
-    await this.chatModel.updateOne(
-      { jid: to },
-      {
-        $set: { lastMessage: message },
-      },
-      { upsert: true },
-    );
-
-    // 5. Emitir evento WebSocket
-    this.whatsappGateway.sendNewMessage(message.toJSON());
-
-    this.logger.log(`[Manual] Media sent to ${to} via operator/API`);
-
-    return { success: true, message: message.toJSON() };
   }
 
   async disconnect() {
+    this.logger.log('Disconnecting WhatsApp socket...');
     if (this.sock) {
-      await this.sock.logout();
+      try {
+        await this.sock.logout();
+      } catch (e) {
+        this.logger.warn(`Error during logout: ${e.message}`);
+      }
       this.sock = null;
-      this.status = 'closed';
+      this.status = 'close';
       this.qr = '';
       this.qrBase64 = '';
       this.whatsappGateway.sendLog('Disconnected successfully.');
@@ -685,12 +751,22 @@ export class WhatsappService implements OnModuleInit {
     return { status: 'disconnected' };
   }
 
-  async logoutAndClearSession() {
+  async logoutAndClearSession(): Promise<{ status: string; result: any }> {
+    this.logger.log('Cleaning up session and clearing credentials...');
+    // Force status to closed to prevent reconnection attempts during cleanup
+    this.status = 'close';
+    
     await this.disconnect();
-    await this.sessionModel.deleteOne({ instanceName: this.instanceName });
+    
+    // Explicitly clear memory state
+    this.qr = '';
+    this.qrBase64 = '';
+    
+    const result = await this.sessionModel.deleteOne({ instanceName: this.instanceName });
     this.whatsappGateway.sendLog('Session credentials cleared from database.');
-    this.logger.log('Session credentials cleared from database.');
-    return { status: 'cleared' };
+    this.logger.log(`Session credentials cleared from database. Result: ${JSON.stringify(result)}`);
+    
+    return { status: 'cleared', result };
   }
 
   async getChats() {

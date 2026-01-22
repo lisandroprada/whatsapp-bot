@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { BrainService } from './brain.service';
+import { BrainController } from './brain.controller';
 import { Message, MessageSchema } from '../whatsapp/schemas/message.schema';
 import { Chat, ChatSchema } from '../whatsapp/schemas/chat.schema';
 import { Contact, ContactSchema } from '../whatsapp/schemas/contact.schema';
+import { AiConfig, AiConfigSchema } from './schemas/ai-config.schema';
 import { CoreBackendService } from './services/core-backend.service';
 import { CoreBackendMockService } from './services/core-backend-mock.service';
 import { AccountStatusTool } from './tools/account-status.tool';
@@ -24,8 +26,10 @@ import { GetAvailableCitiesTool } from './tools/get-available-cities.tool';
       { name: Message.name, schema: MessageSchema },
       { name: Chat.name, schema: ChatSchema },
       { name: Contact.name, schema: ContactSchema },
+      { name: AiConfig.name, schema: AiConfigSchema },
     ]),
   ],
+  controllers: [BrainController],
   providers: [
     BrainService,
     CoreBackendService,
