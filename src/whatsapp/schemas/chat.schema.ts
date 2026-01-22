@@ -23,6 +23,12 @@ export class Chat extends Document {
 
   @Prop({ default: 'BOT', enum: ['BOT', 'HUMAN'] })
   mode: string; // Modo actual: BOT = bot responde, HUMAN = solo humano
+
+  @Prop({ default: null })
+  avatarUrl: string | null;
+
+  @Prop({ default: null })
+  avatarUpdatedAt: Date | null;
 }
 
 export const ChatSchema = SchemaFactory.createForClass(Chat);

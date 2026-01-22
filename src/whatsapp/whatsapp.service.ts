@@ -770,7 +770,39 @@ export class WhatsappService implements OnModuleInit {
   }
 
   async getChats() {
-    return this.chatModel.find().sort({ 'lastMessage.timestamp': -1 }).lean();
+    const chats: any[] = await this.chatModel.find().sort({ 'lastMessage.timestamp': -1 }).lean();
+    
+    // Background refresh of avatars if needed
+    chats.forEach(chat => {
+      const lastUpdate = chat.avatarUpdatedAt ? new Date(chat.avatarUpdatedAt).getTime() : 0;
+      const now = new Date().getTime();
+      const needsRefresh = (now - lastUpdate > 24 * 60 * 60 * 1000); // 24 hours
+      
+      if (needsRefresh && this.sock && this.status === 'open') {
+        this.refreshAvatar(chat.jid).catch(err => 
+          this.logger.debug(`Background avatar refresh failed for ${chat.jid}: ${err.message}`)
+        );
+      }
+    });
+
+    return chats;
+  }
+
+  async refreshAvatar(jid: string): Promise<string | null> {
+    try {
+      const avatarUrl = await this.getProfilePicture(jid);
+      await this.chatModel.updateOne(
+        { jid },
+        { 
+          avatarUrl, 
+          avatarUpdatedAt: new Date() 
+        }
+      );
+      return avatarUrl;
+    } catch (error) {
+      this.logger.error(`Error refreshing avatar for ${jid}: ${error.message}`);
+      return null;
+    }
   }
 
   async getProfilePicture(jid: string): Promise<string | null> {
