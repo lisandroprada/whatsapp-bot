@@ -1,73 +1,75 @@
+# Propietas WhatsApp Bot
+
 <p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
+  <img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" />
+  <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" width="100" alt="WhatsApp Logo" />
 </p>
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Servicio de integración de WhatsApp para el ecosistema **Propietas**, construido con **NestJS**, **Baileys** y **Google Gemini AI**. Este bot actúa como el puente de comunicación entre los clientes, el Core Backend (PostgreSQL) y el Backoffice de administración.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 🚀 Características Principales
 
-## Description
+- **Conexión Multidispositivo**: Basado en `@whiskeysockets/baileys` para una integración estable y moderna con WhatsApp.
+- **Inteligencia Artificial**: Integración nativa con **Google Gemini** para respuestas automáticas inteligentes y procesamiento de lenguaje natural.
+- **Gestión de Chat en Tiempo Real**: Soporte completo para mensajería de texto y multimedia (imágenes, videos, documentos) con actualizaciones vía **Socket.IO**.
+- **Vinculación con Core**: Identificación automática de clientes mediante el número de teléfono y consulta de saldos en tiempo real.
+- **Panel de Administración**: Se integra con el Backoffice para permitir la intervención humana (modo Manual) o dejar que el bot opere de forma autónoma (modo BOT).
+- **Persistencia de Sesión**: Almacenamiento seguro de credenciales y historial de mensajes en **MongoDB**.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 🛠️ Tecnologías
 
-## Installation
+- **Framework**: [NestJS](https://nestjs.com/)
+- **WhatsApp**: [Baileys](https://github.com/WhiskeySockets/Baileys)
+- **Base de Datos**: [MongoDB](https://www.mongodb.com/) (Mongoose)
+- **IA**: [Google Gemini SDK](https://ai.google.dev/)
+- **Comunicación**: [Socket.IO](https://socket.io/)
 
+## 📦 Instalación
+
+1. Clona el repositorio:
 ```bash
-$ pnpm install
+git clone https://github.com/lisandroprada/whatsapp-bot.git
+cd whatsapp-bot
 ```
 
-## Running the app
-
+2. Instala las dependencias:
 ```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+pnpm install
 ```
 
-## Test
-
-```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+3. Configura las variables de entorno en un archivo `.env` (guíate por `.env.example`):
+```env
+MONGODB_URI=mongodb://localhost/nest-whatsapp
+API_KEY=tu_clave_secreta_api
+GEMINI_API_KEY=tu_google_gemini_key
+CORE_BACKEND_URL=http://localhost:3000
 ```
 
-## Support
+## 🏃 Ejecución
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
+# Desarrollo (watch mode)
+pnpm run start:dev
 
-## Stay in touch
+# Producción
+pnpm run build
+pnpm run start:prod
+```
 
-- Author - [Kamil Myśliwiec](https://kamilmysliwiec.com)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## 📡 Endpoints Principales
 
-## License
+- `POST /whatsapp/session/connect`: Iniciar proceso de vinculación QR.
+- `GET /whatsapp/session/status`: Obtener estado actual y QR en base64.
+- `GET /whatsapp/chats`: Lista de conversaciones activas.
+- `POST /whatsapp/message/send/text`: Enviar mensaje manual a un JID.
+- `POST /whatsapp/message/send/media`: Enviar archivos multimedia.
 
-Nest is [MIT licensed](LICENSE).
+## 🤝 Integración con Propietas
+
+Este bot está diseñado para trabajar en conjunto con:
+- **Core Backend**: [propietas_backend_2026](https://github.com/lisandroprada/propietas_backend_2026)
+- **Backoffice**: [propietas_backoffice_2026](https://github.com/lisandroprada/propietas_backoffice_2026)
+
+## 📄 Licencia
+
+Este proyecto es propiedad privada de **Propietas**.
