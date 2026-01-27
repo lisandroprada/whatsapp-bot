@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { WhatsappController } from './whatsapp.controller';
 import { WhatsappService } from './whatsapp.service';
 import { WhatsappGateway } from './whatsapp.gateway';
+import { WhatsAppClientService } from './services/whatsapp-client.service';
 import {
   WhatsappSession,
   WhatsappSessionSchema,
@@ -23,6 +24,7 @@ import { BrainModule } from '../brain/brain.module';
     BrainModule,
   ],
   controllers: [WhatsappController],
-  providers: [WhatsappService, WhatsappGateway],
+  providers: [WhatsappService, WhatsappGateway, WhatsAppClientService],
+  exports: [WhatsAppClientService],
 })
 export class WhatsappModule {}

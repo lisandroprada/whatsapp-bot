@@ -20,9 +20,7 @@ export class CoreBackendService {
 
     // Determinar si usar mock
     this.useMock =
-      !baseURL ||
-      !apiKey ||
-      apiKey === 'development-key-temp-mock';
+      !baseURL || !apiKey || apiKey === 'development-key-temp-mock';
 
     if (this.useMock) {
       this.logger.warn(
@@ -150,7 +148,13 @@ export class CoreBackendService {
   async createComplaint(data: {
     clientId: string;
     propertyId?: string;
-    category: 'plumbing' | 'electric' | 'heating' | 'cleaning' | 'security' | 'other';
+    category:
+      | 'plumbing'
+      | 'electric'
+      | 'heating'
+      | 'cleaning'
+      | 'security'
+      | 'other';
     description: string;
     urgency: 'low' | 'medium' | 'high' | 'urgent';
     evidenceUrls?: string[];
@@ -185,10 +189,13 @@ export class CoreBackendService {
     }
 
     try {
-      const response = await this.client.post('/api/v1/bot/auth/validate-identity', {
-        dni,
-        whatsappJid: jid,
-      });
+      const response = await this.client.post(
+        '/api/v1/bot/auth/validate-identity',
+        {
+          dni,
+          whatsappJid: jid,
+        },
+      );
       return response.data; // { success, clientId, clientName, emailSent, maskedEmail, expiresAt, message }
     } catch (error) {
       this.logger.error(`Failed to validate identity for DNI ${dni}`, error);
@@ -322,6 +329,114 @@ export class CoreBackendService {
       return response.data;
     } catch (error) {
       this.logger.error('Failed to schedule showing', error);
+      throw error;
+    }
+  }
+
+  // ========== Gestión de Números WhatsApp ==========
+
+  /**
+   * Actualizar número de WhatsApp de un cliente
+   * Endpoint Core: PUT /api/v1/bot/client/:clientId/whatsapp
+   */
+  async updateClientWhatsApp(
+    clientId: string,
+    data: {
+      phone: string;
+      whatsappJid?: string;
+      autoDetected?: boolean;
+      verified?: boolean;
+    },
+  ) {
+    if (this.useMock) {
+      return this.mockService.updateClientWhatsApp(clientId, data);
+    }
+
+    try {
+      const response = await this.client.put(
+        `/api/v1/bot/client/${clientId}/whatsapp`,
+        data,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `Failed to update WhatsApp number for client ${clientId}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Obtener información de WhatsApp de un cliente
+   * Endpoint Core: GET /api/v1/bot/client/:clientId/whatsapp
+   */
+  async getClientWhatsApp(clientId: string) {
+    if (this.useMock) {
+      return this.mockService.getClientWhatsApp(clientId);
+    }
+
+    try {
+      const response = await this.client.get(
+        `/api/v1/bot/client/${clientId}/whatsapp`,
+      );
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        return null; // Cliente no tiene WhatsApp configurado
+      }
+      this.logger.error(
+        `Failed to get WhatsApp info for client ${clientId}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Verificar disponibilidad de WhatsApp para un número
+   * Endpoint Core: POST /api/v1/bot/whatsapp/verify
+   */
+  async verifyWhatsAppNumber(phone: string) {
+    if (this.useMock) {
+      return this.mockService.verifyWhatsAppNumber(phone);
+    }
+
+    try {
+      const response = await this.client.post('/api/v1/bot/whatsapp/verify', {
+        phone,
+      });
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to verify WhatsApp number ${phone}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Sincronizar números de WhatsApp con contactos detectados
+   * Endpoint Core: POST /api/v1/bot/whatsapp/sync-contacts
+   */
+  async syncWhatsAppContacts(
+    contacts: Array<{
+      jid: string;
+      phone: string;
+      name?: string;
+      verified: boolean;
+    }>,
+  ) {
+    if (this.useMock) {
+      return this.mockService.syncWhatsAppContacts(contacts);
+    }
+
+    try {
+      const response = await this.client.post(
+        '/api/v1/bot/whatsapp/sync-contacts',
+        { contacts },
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error('Failed to sync WhatsApp contacts', error);
       throw error;
     }
   }

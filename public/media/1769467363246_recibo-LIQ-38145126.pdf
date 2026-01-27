@@ -1,0 +1,82 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react-dom": "https://esm.sh/react-dom@^19.2.3",
+    "recharts": "https://esm.sh/recharts@^3.6.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "@react-google-maps/api": "https://esm.sh/@react-google-maps/api@2.19.2?external=react,react-dom"
+  }
+}
+</script>
+    <script type="module">import { injectIntoGlobalHook } from "/@react-refresh";
+injectIntoGlobalHook(window);
+window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => (type) => type;</script>
+
+    <script type="module" src="/@vite/client"></script>
+
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rentia Admin</title>
+    <link rel="icon" type="image/x-icon" href="/assets/logos/favicon.ico" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&family=Noto+Sans:wght@300..800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              primary: "#135bec",
+              "background-light": "#f6f6f8",
+              "background-dark": "#101622",
+              "surface-dark": "#1c2333",
+              "border-dark": "#2d3748",
+            },
+            fontFamily: {
+              display: ["Manrope", "sans-serif"],
+              body: ["Noto Sans", "sans-serif"],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      .filled-icon {
+        font-variation-settings: 'FILL' 1;
+      }
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 3px;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #334155;
+      }
+    </style>
+
+    <script type="module" src="/index.tsx?t=1769466646749"></script>
+  </head>
+  <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white font-display antialiased">
+    <div id="root"></div>
+  </body>
+</html>

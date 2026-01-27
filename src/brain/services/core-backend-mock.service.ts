@@ -114,7 +114,13 @@ export class CoreBackendMockService {
   async createComplaint(data: {
     clientId: string;
     propertyId?: string;
-    category: 'plumbing' | 'electric' | 'heating' | 'cleaning' | 'security' | 'other';
+    category:
+      | 'plumbing'
+      | 'electric'
+      | 'heating'
+      | 'cleaning'
+      | 'security'
+      | 'other';
     description: string;
     urgency: 'low' | 'medium' | 'high' | 'urgent';
     evidenceUrls?: string[];
@@ -125,7 +131,8 @@ export class CoreBackendMockService {
     return {
       success: true,
       ticketId: `ticket_${Date.now()}`,
-      message: 'Reclamo creado exitosamente. Nuestro equipo lo revisará pronto.',
+      message:
+        'Reclamo creado exitosamente. Nuestro equipo lo revisará pronto.',
       ticket: {
         id: `ticket_${Date.now()}`,
         category: data.category,
@@ -214,7 +221,7 @@ export class CoreBackendMockService {
         price: 180000,
         currency: 'ARS',
         surface: 50,
-        url: 'https://propietas.com/prop/003'
+        url: 'https://propietas.com/prop/003',
       },
       {
         id: 'prop_004',
@@ -226,7 +233,7 @@ export class CoreBackendMockService {
         price: 250000,
         currency: 'ARS',
         surface: 120,
-        url: 'https://propietas.com/prop/004'
+        url: 'https://propietas.com/prop/004',
       },
     ];
   }
@@ -236,7 +243,7 @@ export class CoreBackendMockService {
    */
   async getAvailableCities() {
     this.logger.log(`[MOCK] getAvailableCities`);
-    
+
     return [
       { city: 'Rawson', rent: 6, sale: 1 },
       { city: 'Playa Unión', rent: 2, sale: 0 },
@@ -254,6 +261,139 @@ export class CoreBackendMockService {
       showingId: `showing_${Date.now()}`,
       confirmationSent: true,
       message: 'Visita agendada exitosamente (MOCK)',
+    };
+  }
+
+  // ========== Gestión de Números WhatsApp (MOCK) ==========
+
+  /**
+   * Mock: Actualizar número de WhatsApp de un cliente
+   */
+  async updateClientWhatsApp(
+    clientId: string,
+    data: {
+      phone: string;
+      whatsappJid?: string;
+      autoDetected?: boolean;
+      verified?: boolean;
+    },
+  ) {
+    this.logger.log(`[MOCK] updateClientWhatsApp: ClientID=${clientId}`, data);
+
+    // Buscar cliente por ID
+    const client = Object.values(this.mockClients).find(
+      (c) => c.id === clientId,
+    );
+
+    if (!client) {
+      throw new Error('Cliente no encontrado');
+    }
+
+    // Simular actualización
+    client.phone = data.phone;
+    if (data.whatsappJid) {
+      client.whatsappJid = data.whatsappJid;
+    }
+
+    return {
+      success: true,
+      clientId: clientId,
+      phone: data.phone,
+      whatsappJid: data.whatsappJid,
+      verified: data.verified || false,
+      message: 'Número de WhatsApp actualizado exitosamente (MOCK)',
+    };
+  }
+
+  /**
+   * Mock: Obtener información de WhatsApp de un cliente
+   */
+  async getClientWhatsApp(clientId: string) {
+    this.logger.log(`[MOCK] getClientWhatsApp: ClientID=${clientId}`);
+
+    // Buscar cliente por ID
+    const client = Object.values(this.mockClients).find(
+      (c) => c.id === clientId,
+    );
+
+    if (!client) {
+      return null;
+    }
+
+    return {
+      clientId: clientId,
+      phone: client.phone,
+      whatsappJid: client.whatsappJid,
+      verified: true,
+      autoDetected: client.phone.startsWith('+549'),
+      lastVerified: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Mock: Verificar disponibilidad de WhatsApp para un número
+   */
+  async verifyWhatsAppNumber(phone: string) {
+    this.logger.log(`[MOCK] verifyWhatsAppNumber: ${phone}`);
+
+    // Simular que números móviles argentinos tienen WhatsApp
+    const isMobile = phone.includes('+549') || phone.includes('549');
+
+    return {
+      phone: phone,
+      hasWhatsApp: isMobile,
+      verified: isMobile,
+      jid: isMobile ? `${phone.replace('+', '')}@s.whatsapp.net` : null,
+      message: isMobile
+        ? 'Número de WhatsApp verificado (MOCK)'
+        : 'Número no tiene WhatsApp disponible (MOCK)',
+    };
+  }
+
+  /**
+   * Mock: Sincronizar números de WhatsApp con contactos detectados
+   */
+  async syncWhatsAppContacts(
+    contacts: Array<{
+      jid: string;
+      phone: string;
+      name?: string;
+      verified: boolean;
+    }>,
+  ) {
+    this.logger.log(`[MOCK] syncWhatsAppContacts:`, {
+      contactCount: contacts.length,
+      contacts: contacts.slice(0, 3), // Solo mostrar primeros 3 en log
+    });
+
+    const synced = [];
+    const failed = [];
+
+    for (const contact of contacts) {
+      // Simular que algunos contactos se sincronizan exitosamente
+      if (contact.verified && contact.jid) {
+        synced.push({
+          jid: contact.jid,
+          phone: contact.phone,
+          name: contact.name,
+          status: 'synced',
+        });
+      } else {
+        failed.push({
+          jid: contact.jid,
+          phone: contact.phone,
+          reason: 'No verificado o JID inválido',
+        });
+      }
+    }
+
+    return {
+      success: true,
+      syncedCount: synced.length,
+      failedCount: failed.length,
+      synced: synced,
+      failed: failed,
+      message: `${synced.length} contactos sincronizados exitosamente (MOCK)`,
     };
   }
 }
