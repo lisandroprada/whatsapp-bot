@@ -440,4 +440,29 @@ export class CoreBackendService {
       throw error;
     }
   }
+
+  /**
+   * Crear un lead en el CRM
+   * Endpoint Core: POST /api/v1/bot/leads
+   */
+  async createLead(data: {
+    title: string;
+    description?: string;
+    agentId?: string;
+    source?: string;
+    expectedValue?: number;
+    priority?: string;
+  }) {
+    if (this.useMock) {
+       return { success: true, leadId: 'mock-lead-id', message: 'Lead creado (MOCK)' };
+    }
+
+    try {
+      const response = await this.client.post('/api/v1/bot/leads', data);
+      return response.data;
+    } catch (error) {
+      this.logger.error('Failed to create lead in Core', error);
+      throw error;
+    }
+  }
 }

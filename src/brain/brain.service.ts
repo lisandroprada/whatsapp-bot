@@ -20,6 +20,7 @@ import { ScheduleMeetingTool } from './tools/schedule-meeting.tool';
 import { GetRentalRequirementsTool } from './tools/get-rental-requirements.tool';
 import { RequestAppraisalTool } from './tools/request-appraisal.tool';
 import { GetAvailableCitiesTool } from './tools/get-available-cities.tool';
+import { CreateLeadTool } from './tools/create-lead.tool';
 
 /**
  * BrainService - Orquestador de Google Gemini AI
@@ -47,6 +48,7 @@ export class BrainService {
     private readonly getRentalRequirementsTool: GetRentalRequirementsTool,
     private readonly requestAppraisalTool: RequestAppraisalTool,
     private readonly getAvailableCitiesTool: GetAvailableCitiesTool,
+    private readonly createLeadTool: CreateLeadTool,
   ) {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
 
@@ -73,6 +75,7 @@ export class BrainService {
             this.scheduleMeetingTool.declaration,
             this.getRentalRequirementsTool.declaration,
             this.requestAppraisalTool.declaration,
+            this.createLeadTool.declaration,
           ],
         },
       ],
@@ -88,6 +91,7 @@ export class BrainService {
       [this.scheduleMeetingTool.declaration.name]: this.scheduleMeetingTool,
       [this.getRentalRequirementsTool.declaration.name]: this.getRentalRequirementsTool,
       [this.requestAppraisalTool.declaration.name]: this.requestAppraisalTool,
+      [this.createLeadTool.declaration.name]: this.createLeadTool,
     };
   }
 
@@ -123,6 +127,7 @@ export class BrainService {
               this.getRentalRequirementsTool.declaration,
               this.requestAppraisalTool.declaration,
               this.getAvailableCitiesTool.declaration,
+              this.createLeadTool.declaration,
             ],
           },
         ],
@@ -210,6 +215,9 @@ export class BrainService {
               break;
             case 'get_available_cities':
               toolResult = await this.getAvailableCitiesTool.execute();
+              break;
+            case 'create_crm_lead':
+              toolResult = await this.createLeadTool.execute(call.args as any, { coreClientId, jid });
               break;
             default:
               this.logger.error(`[Brain] Tool not found or not implemented: ${call.name}`);

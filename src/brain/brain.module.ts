@@ -18,6 +18,7 @@ import { ScheduleMeetingTool } from './tools/schedule-meeting.tool';
 import { GetRentalRequirementsTool } from './tools/get-rental-requirements.tool';
 import { RequestAppraisalTool } from './tools/request-appraisal.tool';
 import { GetAvailableCitiesTool } from './tools/get-available-cities.tool';
+import { CreateLeadTool } from './tools/create-lead.tool';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { GetAvailableCitiesTool } from './tools/get-available-cities.tool';
     GetRentalRequirementsTool,
     RequestAppraisalTool,
     GetAvailableCitiesTool,
+    CreateLeadTool,
   ],
   exports: [BrainService, CoreBackendService],
 })
