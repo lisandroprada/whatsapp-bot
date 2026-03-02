@@ -28,6 +28,7 @@ import { CreateAgendaActionTool } from './tools/operator/create-agenda-action.to
 import { EditAgendaActionTool } from './tools/operator/edit-agenda-action.tool';
 import { MarkActionDoneTool } from './tools/operator/mark-action-done.tool';
 import { SearchContactsTool } from './tools/operator/search-contacts.tool';
+import { SendWhatsAppToContactTool } from './tools/operator/send-whatsapp-to-contact.tool';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { SearchContactsTool } from './tools/operator/search-contacts.tool';
     EditAgendaActionTool,
     MarkActionDoneTool,
     SearchContactsTool,
+    SendWhatsAppToContactTool,
   ],
   exports: [BrainService, IdentityResolverService, OperatorBrainService, CoreBackendService],
 })

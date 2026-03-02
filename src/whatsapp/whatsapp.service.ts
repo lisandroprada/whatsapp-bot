@@ -689,7 +689,18 @@ export class WhatsappService implements OnModuleInit {
         throw new Error('WhatsApp socket is not initialized');
       }
 
-      const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+      // If 'to' is already a JID, use it. Otherwise resolve the phone number.
+      // Prefer existing chat JID to avoid creating duplicate conversations (@lid vs @s.whatsapp.net).
+      let jid: string;
+      if (to.includes('@')) {
+        jid = to;
+      } else {
+        const phone = to.replace(/\D/g, '');
+        const existing = await this.chatModel.findOne({
+          jid: { $regex: phone },
+        }).lean();
+        jid = existing?.jid ?? `${phone}@s.whatsapp.net`;
+      }
       this.logger.log(`[sendText] Resolved JID: ${jid}`);
 
       // 1. Enviar mensaje por WhatsApp
@@ -708,11 +719,21 @@ export class WhatsappService implements OnModuleInit {
       await message.save();
       this.logger.log(`[sendText] Message saved to MongoDB for ${jid}`);
 
-      // 3. Actualizar último mensaje del chat
+      // 3. Actualizar último mensaje del chat (upsert — preservar name si ya existe)
+      const existingChat = await this.chatModel.findOne({ jid }).lean();
+      let contactName: string | undefined;
+      if (!existingChat?.name) {
+        // Try to resolve name from contact collection
+        const contact = await this.contactModel.findOne({ jid }).lean();
+        contactName = contact?.name ?? undefined;
+      }
       await this.chatModel.updateOne(
         { jid: jid },
         {
-          $set: { lastMessage: message },
+          $set: {
+            lastMessage: message,
+            ...(contactName && { name: contactName }),
+          },
         },
         { upsert: true },
       );
