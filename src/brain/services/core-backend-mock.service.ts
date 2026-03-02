@@ -350,6 +350,78 @@ export class CoreBackendMockService {
     };
   }
 
+  // ========== Operator Mocks ==========
+
+  /**
+   * Mock: Resolver si un JID es operador
+   */
+  async resolveOperator(jid: string) {
+    this.logger.log(`[MOCK] resolveOperator: ${jid}`);
+    // Simular un operador conocido para testing
+    if (jid === '5492804000001@s.whatsapp.net') {
+      return {
+        isOperator: true,
+        agentId: 'agent_op_001',
+        name: 'Carlos Operador',
+        role: 'ADMIN',
+        companyId: 'company_001',
+      };
+    }
+    return { isOperator: false };
+  }
+
+  /**
+   * Mock: Listar órdenes de trabajo del operador
+   */
+  async getOperatorWorkOrders(agentId: string, status?: string) {
+    this.logger.log(`[MOCK] getOperatorWorkOrders: agentId=${agentId}, status=${status}`);
+    return [
+      {
+        id: 'wo_001',
+        description: 'Reparar canilla del baño',
+        status: 'PRESUPUESTO',
+        priority: 'ALTA',
+        totalAmount: 15000,
+        currency: 'ARS',
+        createdAt: new Date().toISOString(),
+        property: 'Av. Libertador 1234',
+        payer: 'Juan Pérez',
+        provider: 'Carlos Operador',
+      },
+      {
+        id: 'wo_002',
+        description: 'Revisión eléctrica general',
+        status: 'APROBADO',
+        priority: 'NORMAL',
+        totalAmount: 25000,
+        currency: 'ARS',
+        createdAt: new Date().toISOString(),
+        property: 'Calle Corrientes 5678',
+        payer: 'María González',
+        provider: 'Carlos Operador',
+      },
+    ].filter((wo) => !status || wo.status === status);
+  }
+
+  /**
+   * Mock: Crear orden de trabajo
+   */
+  async createOperatorWorkOrder(data: {
+    agentId: string;
+    description: string;
+    urgency?: string;
+    propertyReference?: string;
+  }) {
+    this.logger.log(`[MOCK] createOperatorWorkOrder:`, data);
+    const id = `wo_${Date.now()}`;
+    return {
+      success: true,
+      workOrderId: id,
+      status: 'PRESUPUESTO',
+      message: `Orden de trabajo creada (ID: ${id}) (MOCK)`,
+    };
+  }
+
   /**
    * Mock: Sincronizar números de WhatsApp con contactos detectados
    */

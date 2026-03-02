@@ -3,6 +3,8 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { BrainService } from './brain.service';
 import { BrainController } from './brain.controller';
+import { IdentityResolverService } from './identity-resolver.service';
+import { OperatorBrainService } from './operator-brain.service';
 import { Message, MessageSchema } from '../whatsapp/schemas/message.schema';
 import { Chat, ChatSchema } from '../whatsapp/schemas/chat.schema';
 import { Contact, ContactSchema } from '../whatsapp/schemas/contact.schema';
@@ -19,6 +21,13 @@ import { GetRentalRequirementsTool } from './tools/get-rental-requirements.tool'
 import { RequestAppraisalTool } from './tools/request-appraisal.tool';
 import { GetAvailableCitiesTool } from './tools/get-available-cities.tool';
 import { CreateLeadTool } from './tools/create-lead.tool';
+import { GetPendingTasksTool } from './tools/operator/get-pending-tasks.tool';
+import { CreateWorkOrderTool } from './tools/operator/create-work-order.tool';
+import { GetAgendaTool } from './tools/operator/get-agenda.tool';
+import { CreateAgendaActionTool } from './tools/operator/create-agenda-action.tool';
+import { EditAgendaActionTool } from './tools/operator/edit-agenda-action.tool';
+import { MarkActionDoneTool } from './tools/operator/mark-action-done.tool';
+import { SearchContactsTool } from './tools/operator/search-contacts.tool';
 
 @Module({
   imports: [
@@ -33,6 +42,8 @@ import { CreateLeadTool } from './tools/create-lead.tool';
   controllers: [BrainController],
   providers: [
     BrainService,
+    IdentityResolverService,
+    OperatorBrainService,
     CoreBackendService,
     CoreBackendMockService,
     AccountStatusTool,
@@ -45,7 +56,14 @@ import { CreateLeadTool } from './tools/create-lead.tool';
     RequestAppraisalTool,
     GetAvailableCitiesTool,
     CreateLeadTool,
+    GetPendingTasksTool,
+    CreateWorkOrderTool,
+    GetAgendaTool,
+    CreateAgendaActionTool,
+    EditAgendaActionTool,
+    MarkActionDoneTool,
+    SearchContactsTool,
   ],
-  exports: [BrainService, CoreBackendService],
+  exports: [BrainService, IdentityResolverService, OperatorBrainService, CoreBackendService],
 })
 export class BrainModule {}

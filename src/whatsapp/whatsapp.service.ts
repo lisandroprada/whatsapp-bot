@@ -22,6 +22,8 @@ import { Message } from './schemas/message.schema';
 import { Contact } from './schemas/contact.schema';
 import { BrainService } from '../brain/brain.service';
 import { CoreBackendService } from '../brain/services/core-backend.service';
+import { IdentityResolverService } from '../brain/identity-resolver.service';
+import { OperatorBrainService } from '../brain/operator-brain.service';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -41,6 +43,8 @@ export class WhatsappService implements OnModuleInit {
     private readonly whatsappGateway: WhatsappGateway,
     private readonly brainService: BrainService,
     private readonly coreBackendService: CoreBackendService,
+    private readonly identityResolverService: IdentityResolverService,
+    private readonly operatorBrainService: OperatorBrainService,
   ) {}
 
   async onModuleInit() {
@@ -225,6 +229,40 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
+      // Comando: /modo-operador — activa el modo interno (requiere ser User del sistema)
+      if (content.trim().toLowerCase() === '/modo-operador') {
+        const identity = await this.identityResolverService.resolve(jid);
+
+        if (identity.isOperator) {
+          this.logger.log(`[Cmd] /modo-operador activado para ${jid} (${identity.operatorData?.name})`);
+          await this.sendText(
+            jid,
+            `✅ *Modo operador activado*\n\nHola ${identity.operatorData?.name}. Podés pedirme tareas pendientes, crear órdenes de trabajo o buscar propiedades.\n\nEscribí */modo-cliente* para volver al modo externo.`,
+          );
+        } else {
+          this.logger.log(`[Cmd] /modo-operador denegado para ${jid} (no es usuario del sistema)`);
+          await this.sendText(
+            jid,
+            '⛔ No tenés permisos para activar el modo operador. Este número no está registrado como usuario del sistema.',
+          );
+        }
+        return;
+      }
+
+      // Comando: /modo-cliente — desactiva el modo operador y vuelve al flujo externo
+      if (content.trim().toLowerCase() === '/modo-cliente') {
+        await this.chatModel.updateOne(
+          { jid },
+          { $set: { isOperator: false, operatorAgentId: null } },
+        );
+        this.logger.log(`[Cmd] /modo-cliente activado para ${jid}`);
+        await this.sendText(
+          jid,
+          '👤 *Modo cliente activado*\n\nAhora te atiendo como usuario externo. Escribí */modo-operador* para volver al modo interno.',
+        );
+        return;
+      }
+
       // Comando especial: /mail (probar envío de email)
       if (content.trim().toLowerCase() === '/mail') {
         try {
@@ -332,14 +370,49 @@ export class WhatsappService implements OnModuleInit {
         this.logger.log(`[Brain] New chat created for ${jid}`);
       }
 
-      // 2. Intentar vincular con Core Backend (auto-link)
+      // 2. Routing: operator mode is set explicitly via /modo-operador command.
+      // 3. If operator — route to OperatorBrainService (skip client auto-link)
+      if (chat.isOperator && chat.operatorAgentId) {
+        // 3a. Verify bot mode
+        const shouldBotRespond = chat.mode === 'BOT' && chat.isBotActive !== false;
+        if (!shouldBotRespond) {
+          this.logger.log(`[Brain] Bot disabled for operator ${jid}`);
+          return;
+        }
+
+        const textContent =
+          message.message?.conversation ||
+          message.message?.extendedTextMessage?.text ||
+          '';
+
+        if (!textContent) return;
+
+        this.logger.log(`[Brain] Routing to OperatorBrain for ${chat.name || jid}`);
+
+        const aiResponse = await this.operatorBrainService.processMessage(
+          jid,
+          textContent,
+          {
+            userId: (chat as any).operatorUserId ?? chat.operatorAgentId,
+            agentId: chat.operatorAgentId,
+            name: chat.name || 'Operador',
+            role: 'ADMIN',
+            companyId: (chat as any).operatorCompanyId ?? '',
+          },
+        );
+
+        await this.sendText(jid, aiResponse);
+        return;
+      }
+
+      // 4. Client flow — attempt auto-link
       if (!chat.coreClientId) {
         await this.tryLinkClientFromCore(jid, chat);
         // Recargar chat después del link
         chat = await this.chatModel.findOne({ jid });
       }
 
-      // 3. Verificar si debe responder el bot
+      // 5. Verificar si debe responder el bot
       const shouldBotRespond = chat.mode === 'BOT' && chat.isBotActive !== false;
 
       if (!shouldBotRespond) {
@@ -349,12 +422,12 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
-      // 4. Obtener nombre del cliente si está registrado
+      // 6. Obtener nombre del cliente si está registrado
       let clientName: string | undefined;
       if (chat.coreClientId) {
         // Primero intentar desde el chat (guardado en tryLinkClientFromCore)
         clientName = chat.name;
-        
+
         // Si no está en chat, buscar en contactos
         if (!clientName) {
           const contact = await this.contactModel.findOne({ jid });
@@ -362,10 +435,10 @@ export class WhatsappService implements OnModuleInit {
         }
       }
 
-      // 5. Determinar si es usuario registrado
+      // 7. Determinar si es usuario registrado
       const isRegistered = !!chat.coreClientId;
 
-      // 6. Extraer texto del mensaje
+      // 8. Extraer texto del mensaje
       const textContent =
         message.message?.conversation ||
         message.message?.extendedTextMessage?.text ||
@@ -376,7 +449,7 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
-      // 7. Procesar con Brain
+      // 9. Procesar con Brain (cliente externo)
       this.logger.log(
         `[Brain] Processing message for ${clientName || jid} (${isRegistered ? 'REGISTERED' : 'GUEST'})`,
       );
@@ -384,7 +457,7 @@ export class WhatsappService implements OnModuleInit {
       const aiResponse = await this.brainService.processMessage(
         jid,
         textContent,
-      isRegistered,
+        isRegistered,
         clientName,
         chat.coreClientId,
       );

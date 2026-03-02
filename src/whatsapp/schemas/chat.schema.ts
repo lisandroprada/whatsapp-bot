@@ -29,6 +29,18 @@ export class Chat extends Document {
 
   @Prop({ default: null })
   avatarUpdatedAt: Date | null;
+
+  @Prop({ default: false })
+  isOperator: boolean;
+
+  @Prop({ default: null })
+  operatorAgentId: string | null;
+
+  @Prop({ default: null })
+  operatorUserId: string | null;
+
+  @Prop({ default: null })
+  operatorCompanyId: string | null;
 }
 
 export const ChatSchema = SchemaFactory.createForClass(Chat);

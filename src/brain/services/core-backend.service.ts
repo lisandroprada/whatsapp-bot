@@ -441,6 +441,180 @@ export class CoreBackendService {
     }
   }
 
+  // ========== Contact Search ==========
+
+  /**
+   * Search contacts (Agents) by name within a company.
+   * Endpoint Core: GET /api/v1/bot/contacts/search?name=&companyId=
+   */
+  async searchContacts(name: string, companyId: string) {
+    if (this.useMock) {
+      return {
+        contacts: [
+          { id: 'mock-1', name: 'Mock Contact', firstName: 'Mock', lastName: 'Contact', phones: ['2800000000'], primaryPhone: '2800000000', email: null },
+        ],
+      };
+    }
+
+    try {
+      const response = await this.client.get('/api/v1/bot/contacts/search', {
+        params: { name, companyId },
+      });
+      return response.data; // { contacts: [...] }
+    } catch (error) {
+      this.logger.error(`Failed to search contacts for name "${name}"`, error);
+      return { contacts: [] };
+    }
+  }
+
+  // ========== Operator Endpoints ==========
+
+  /**
+   * Resolve if a JID belongs to an operator
+   * Endpoint Core: GET /api/v1/bot/agents/resolve-operator/:jid
+   */
+  async resolveOperator(jid: string) {
+    if (this.useMock) {
+      return this.mockService.resolveOperator(jid);
+    }
+
+    try {
+      const response = await this.client.get(
+        `/api/v1/bot/agents/resolve-operator/${encodeURIComponent(jid)}`,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to resolve operator for JID ${jid}`, error);
+      return { isOperator: false };
+    }
+  }
+
+  /**
+   * Get work orders for an operator
+   * Endpoint Core: GET /api/v1/bot/operators/:agentId/work-orders
+   */
+  async getOperatorWorkOrders(agentId: string, status?: string) {
+    if (this.useMock) {
+      return this.mockService.getOperatorWorkOrders(agentId, status);
+    }
+
+    try {
+      const response = await this.client.get(
+        `/api/v1/bot/operators/${agentId}/work-orders`,
+        { params: status ? { status } : {} },
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to get work orders for agent ${agentId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a work order via operator bot
+   * Endpoint Core: POST /api/v1/bot/operators/work-orders
+   */
+  async createOperatorWorkOrder(data: {
+    agentId: string;
+    description: string;
+    urgency?: string;
+    propertyReference?: string;
+  }) {
+    if (this.useMock) {
+      return this.mockService.createOperatorWorkOrder(data);
+    }
+
+    try {
+      const response = await this.client.post(
+        '/api/v1/bot/operators/work-orders',
+        data,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error('Failed to create operator work order', error);
+      throw error;
+    }
+  }
+
+  // ========== Agenda Endpoints ==========
+
+  /**
+   * Get the agenda for a given day (formatted text + raw events).
+   * Endpoint Core: GET /api/v1/bot/operators/agenda?companyId=&date=
+   */
+  async getOperatorAgenda(companyId: string, date?: string, userId?: string) {
+    try {
+      const response = await this.client.get('/api/v1/bot/operators/agenda', {
+        params: { companyId, date, userId },
+      });
+      return response.data; // { events, text }
+    } catch (error) {
+      this.logger.error('Failed to get operator agenda', error);
+      return { events: [], text: 'No se pudo obtener la agenda en este momento.' };
+    }
+  }
+
+  /**
+   * Create a scheduled action from the bot.
+   * dateText can be natural language ("mañana a las 10") or ISO string.
+   * Endpoint Core: POST /api/v1/bot/operators/agenda
+   */
+  async createOperatorAction(data: {
+    companyId: string;
+    userId: string;
+    title: string;
+    dateText: string;
+    type?: string;
+    notes?: string;
+    assignedToUserId?: string;
+  }) {
+    try {
+      const response = await this.client.post('/api/v1/bot/operators/agenda', data);
+      return response.data; // { success, actionId, message }
+    } catch (error) {
+      this.logger.error('Failed to create operator action', error);
+      return { success: false, message: 'No se pudo crear el evento.' };
+    }
+  }
+
+  /**
+   * Update an existing scheduled action (reschedule, rename, etc).
+   * Endpoint Core: PUT /api/v1/bot/operators/agenda/:id
+   */
+  async updateOperatorAction(
+    actionId: string,
+    companyId: string,
+    data: { title?: string; dateText?: string; type?: string; notes?: string },
+  ) {
+    try {
+      const response = await this.client.put(
+        `/api/v1/bot/operators/agenda/${actionId}`,
+        { companyId, ...data },
+      );
+      return response.data; // { success, actionId, message }
+    } catch (error) {
+      this.logger.error(`Failed to update action ${actionId}`, error);
+      return { success: false, message: 'No se pudo actualizar el evento.' };
+    }
+  }
+
+  /**
+   * Mark a scheduled action as done.
+   * Endpoint Core: PUT /api/v1/bot/operators/agenda/:id/done
+   */
+  async markOperatorActionDone(actionId: string, companyId: string) {
+    try {
+      const response = await this.client.put(
+        `/api/v1/bot/operators/agenda/${actionId}/done`,
+        { companyId },
+      );
+      return response.data; // { success, message }
+    } catch (error) {
+      this.logger.error(`Failed to mark action ${actionId} as done`, error);
+      return { success: false, message: 'No se pudo actualizar el evento.' };
+    }
+  }
+
   /**
    * Crear un lead en el CRM
    * Endpoint Core: POST /api/v1/bot/leads
