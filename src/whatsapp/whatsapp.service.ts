@@ -8,6 +8,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   BufferJSON,
   downloadMediaMessage,
+  Browsers,
 } from '@whiskeysockets/baileys';
 import { initAuthCreds } from '@whiskeysockets/baileys/lib/Utils/auth-utils';
 import { Boom } from '@hapi/boom';
@@ -24,6 +25,7 @@ import { BrainService } from '../brain/brain.service';
 import { CoreBackendService } from '../brain/services/core-backend.service';
 import { IdentityResolverService } from '../brain/identity-resolver.service';
 import { OperatorBrainService } from '../brain/operator-brain.service';
+import { MessageQueueService, MessagePriority } from './services/message-queue.service';
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -33,6 +35,11 @@ export class WhatsappService implements OnModuleInit {
   private qrBase64: string = '';
   private readonly logger = new Logger(WhatsappService.name);
   private readonly instanceName = 'my-instance'; // Hardcoded for single session
+
+  // --- Anti-ban: reconexión con backoff exponencial ---
+  private reconnectAttempts = 0;
+  private readonly MAX_RECONNECT_ATTEMPTS = 10;
+  private readonly BASE_RECONNECT_DELAY_MS = 5_000;
 
   constructor(
     @InjectModel(WhatsappSession.name)
@@ -45,6 +52,7 @@ export class WhatsappService implements OnModuleInit {
     private readonly coreBackendService: CoreBackendService,
     private readonly identityResolverService: IdentityResolverService,
     private readonly operatorBrainService: OperatorBrainService,
+    private readonly messageQueueService: MessageQueueService,
   ) {}
 
   async onModuleInit() {
@@ -93,6 +101,10 @@ export class WhatsappService implements OnModuleInit {
         },
         printQRInTerminal: false,
         logger: pinoLogger as any,
+        // Anti-ban: identidad de dispositivo realista
+        browser: Browsers.macOS('Chrome'),
+        // Anti-ban: no anunciar presencia "online" al conectar
+        markOnlineOnConnect: false,
       });
 
       this.sock.ev.on(
@@ -129,11 +141,16 @@ export class WhatsappService implements OnModuleInit {
     let content = 'Unsupported message type';
 
     try {
-      if (
+      const isDocumentType =
+        messageType === 'documentMessage' ||
+        messageType === 'documentWithCaptionMessage';
+      const isMediaType =
         messageType === 'imageMessage' ||
         messageType === 'videoMessage' ||
-        messageType === 'audioMessage'
-      ) {
+        messageType === 'audioMessage' ||
+        isDocumentType;
+
+      if (isMediaType) {
         const mediaBuffer = await downloadMediaMessage(message, 'buffer', {});
 
         let fileExtension: string;
@@ -151,20 +168,31 @@ export class WhatsappService implements OnModuleInit {
             fileExtension = 'ogg';
             mimeType = message.message.audioMessage?.mimetype || 'audio/ogg';
             break;
+          case 'documentMessage':
+          case 'documentWithCaptionMessage': {
+            const docMsg =
+              message.message.documentMessage ||
+              message.message.documentWithCaptionMessage?.message?.documentMessage;
+            mimeType = docMsg?.mimetype || 'application/octet-stream';
+            const ext = mimeType.includes('pdf') ? 'pdf' : 'bin';
+            fileExtension = ext;
+            break;
+          }
           default:
             fileExtension = 'bin';
             mimeType = 'application/octet-stream';
             break;
         }
 
-        const originalFileName = 
-          message.message[messageType]?.fileName || 
+        const originalFileName =
+          message.message[messageType]?.fileName ||
+          message.message.documentWithCaptionMessage?.message?.documentMessage?.fileName ||
           `media_${Date.now()}.${fileExtension}`;
         const fileName = `${Date.now()}.${fileExtension}`;
         const filePath = join(process.cwd(), 'public', 'media', fileName);
         fs.writeFileSync(filePath, mediaBuffer as Buffer);
         content = `/media/${fileName}`;
-        
+
         // Store metadata for frontend
         const newMessage = new this.messageModel({
           jid,
@@ -189,6 +217,15 @@ export class WhatsappService implements OnModuleInit {
         );
 
         this.whatsappGateway.sendNewMessage(newMessage.toJSON());
+
+        // ===== SHOWING PRE-QUALIFICATION: intercept docs if there's an active showing =====
+        if (messageType === 'imageMessage' || isDocumentType) {
+          const chat = await this.chatModel.findOne({ jid });
+          if (chat?.activeShowingCaseId) {
+            await this.handleShowingDocument(jid, chat, content, originalFileName, mimeType);
+            return;
+          }
+        }
 
         // Process by brain
         await this.processByBrain(message, jid);
@@ -215,13 +252,14 @@ export class WhatsappService implements OnModuleInit {
           { jid },
           { 
             $set: { 
-              isBotActive: true, 
+              isBotActive: true,
               mode: 'BOT',
               lastMessage: null,
-              unreadCount: 0
+              unreadCount: 0,
+              activeShowingCaseId: null,
+              showingDocsReceived: [],
               // No borramos coreClientId para no desvincular, solo limpiar chat
-              // Si se quiere desvincular, usar /unlink (futuro)
-            } 
+            }
           }
         );
 
@@ -350,6 +388,81 @@ export class WhatsappService implements OnModuleInit {
   }
 
   /**
+   * Maneja un archivo recibido como parte del proceso de pre-calificación de visita.
+   * Determina si es doc del titular o garante y responde en consecuencia.
+   */
+  private async handleShowingDocument(
+    jid: string,
+    chat: any,
+    fileUrl: string,
+    fileName: string,
+    mimeType: string,
+  ) {
+    const docsReceived: string[] = chat.showingDocsReceived ?? [];
+    const isTitularReceived = docsReceived.includes('titular');
+    const isGaranteReceived = docsReceived.includes('garante');
+
+    // Determine which doc this is
+    const docType = isTitularReceived ? 'garante' : 'titular';
+
+    this.logger.log(`[Showing] ${jid} sent doc → type=${docType} case=${chat.activeShowingCaseId}`);
+
+    // Attach to CRM case in backend
+    try {
+      await this.coreBackendService.attachShowingDocument(chat.activeShowingCaseId, {
+        docType,
+        fileUrl,
+        fileName,
+      });
+    } catch (err) {
+      this.logger.error('[Showing] Failed to attach document to case', err);
+    }
+
+    // Update chat state
+    const newDocs = [...docsReceived, docType];
+    await this.chatModel.updateOne({ jid }, { $set: { showingDocsReceived: newDocs } });
+
+    if (docType === 'titular') {
+      // First doc received — ask for guarantor
+      await this.sendText(
+        jid,
+        `✅ ¡Recibí el recibo de sueldo del *titular*!\n\n` +
+        `Ahora necesito el recibo de sueldo del *garante* para completar el proceso.\n\n` +
+        `Recordá que el garante:\n` +
+        `• No puede ser jubilado\n` +
+        `• No puede ser cónyuge ni pareja del titular\n` +
+        `• El alquiler no puede superar el 30% de sus ingresos netos\n\n` +
+        `Cuando lo tengas, enviámelo y te confirmo la visita. 📄`,
+      );
+    } else {
+      // Both docs received
+      await this.sendText(
+        jid,
+        `✅ ¡Perfecto! Recibí toda la documentación:\n\n` +
+        `📄 Recibo titular ✅\n` +
+        `📄 Recibo garante ✅\n\n` +
+        `Un asesor revisará los documentos y te confirmará la visita en las próximas horas.\n\n` +
+        `¡Muchas gracias por tu confianza! 🏠`,
+      );
+
+      // Clear active showing state
+      await this.chatModel.updateOne(
+        { jid },
+        { $set: { activeShowingCaseId: null, showingDocsReceived: [] } },
+      );
+
+      // Update CRM case status to EN_PROCESO via backend
+      try {
+        await this.coreBackendService.attachShowingDocument(chat.activeShowingCaseId, {
+          docType: 'complete',
+          fileUrl: '',
+          fileName: 'Documentación completa recibida vía WhatsApp',
+        });
+      } catch (_) { /* non-critical */ }
+    }
+  }
+
+  /**
    * Procesar mensaje usando BrainService
    */
   private async processByBrain(message: any, jid: string) {
@@ -401,13 +514,21 @@ export class WhatsappService implements OnModuleInit {
           },
         );
 
-        await this.sendText(jid, aiResponse);
+        await this.sendText(jid, aiResponse, { incomingMessageKey: message.key });
         return;
       }
 
       // 4. Client flow — attempt auto-link
+      // Clear stale MongoDB ObjectIds (24-char hex) stored from the old system
+      const isStaleMongoId = /^[a-f0-9]{24}$/i.test(chat.coreClientId || '');
+      if (isStaleMongoId) {
+        this.logger.log(`[Brain] Clearing stale MongoDB coreClientId for ${jid}`);
+        await this.chatModel.updateOne({ jid }, { $set: { coreClientId: null } });
+        chat.coreClientId = null;
+      }
+
       if (!chat.coreClientId) {
-        await this.tryLinkClientFromCore(jid, chat);
+        await this.tryLinkClientFromCore(jid, chat, message.pushName);
         // Recargar chat después del link
         chat = await this.chatModel.findOne({ jid });
       }
@@ -463,7 +584,7 @@ export class WhatsappService implements OnModuleInit {
       );
 
       // 8. Enviar respuesta por WhatsApp (sendText ya guarda en DB y emite evento)
-      await this.sendText(jid, aiResponse);
+      await this.sendText(jid, aiResponse, { incomingMessageKey: message.key });
 
       // 9. Guardar respuesta del bot en MongoDB
       // const botMessage = new this.messageModel({
@@ -493,40 +614,53 @@ export class WhatsappService implements OnModuleInit {
   }
 
   /**
-   * Intenta vincular automáticamente el JID con un cliente del Core Backend
+   * Intenta vincular automáticamente el JID con un cliente del Core Backend.
+   * Si no existe, crea un registro PROSPECT provisional con el nombre de WhatsApp.
    */
-  private async tryLinkClientFromCore(jid: string, chat: any) {
+  private async tryLinkClientFromCore(jid: string, chat: any, pushName?: string) {
     try {
       const coreClient = await this.coreBackendService.getClientByJid(jid);
 
       if (coreClient) {
         this.logger.log(`[AutoLink] Found client in Core: ${coreClient.name}`);
 
-        // Actualizar chat con ID del Core y nombre
         await this.chatModel.updateOne(
           { jid },
-          {
-            coreClientId: coreClient.id,
-            name: coreClient.name, // Guardar nombre del cliente
-          },
+          { coreClientId: coreClient.id, name: coreClient.name },
         );
 
-        // Actualizar o crear contacto con nombre
         await this.contactModel.updateOne(
           { jid },
-          {
-            name: coreClient.name,
-            phone: coreClient.phone,
-            isVerified: true,
-            metadata: coreClient,
-          },
+          { name: coreClient.name, phone: coreClient.phone, isVerified: true, metadata: coreClient },
           { upsert: true },
         );
 
         this.logger.log(`[AutoLink] Linked ${jid} to Core client ${coreClient.id} (${coreClient.name})`);
+        return;
+      }
+
+      // Not found in Core — create provisional PROSPECT
+      const phone = jid.split('@')[0];
+      const name = pushName || chat.name || phone;
+
+      this.logger.log(`[AutoLink] No Core client found for ${jid} — creating PROSPECT "${name}"`);
+
+      const prospect = await this.coreBackendService.createProspect({ name, phone, jid });
+
+      if (prospect?.id) {
+        await this.chatModel.updateOne(
+          { jid },
+          { coreClientId: prospect.id, name },
+        );
+        await this.contactModel.updateOne(
+          { jid },
+          { name, phone, isVerified: false },
+          { upsert: true },
+        );
+        this.logger.log(`[AutoLink] Created PROSPECT ${prospect.documentNumber} → id=${prospect.id}`);
       }
     } catch (error) {
-      this.logger.warn(`[AutoLink] Could not link ${jid} to Core:`, error.message);
+      this.logger.warn(`[AutoLink] Could not link/create ${jid}:`, error.message);
     }
   }
 
@@ -643,29 +777,55 @@ export class WhatsappService implements OnModuleInit {
 
     if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      
-      this.logger.error(`Connection closed. Status code: ${statusCode}. Error: ${lastDisconnect?.error}`);
-      this.whatsappGateway.sendLog(
-        `Connection closed (Code: ${statusCode}). Reconnecting: ${shouldReconnect}`,
+
+      this.logger.error(
+        `[Connection] Cerrada. Code: ${statusCode}. Error: ${lastDisconnect?.error}`,
       );
 
-      if (shouldReconnect) {
-        // Si no fue un logout manual, intentamos reconectar
-        setTimeout(() => this.connect(), 5000);
-      } else {
-        // Si fue logout, limpiamos todo
+      // --- Anti-ban: detectar baneo (403) vs logout normal (401) ---
+      if (statusCode === 403) {
+        // Posible ban de WhatsApp — pausar cola y alertar sin reconectar
+        this.messageQueueService.pause('Posible baneo detectado (403)');
+        this.whatsappGateway.sendStatus('banned');
+        this.whatsappGateway.sendLog(
+          '⚠️ ALERTA CRÍTICA: Cuenta posiblemente baneada por WhatsApp (código 403). ' +
+          'Todos los envíos pausados. Contactar soporte de Rentia de inmediato.',
+        );
+        this.logger.error('[ALERT] Posible baneo de WhatsApp (403). Cola pausada. NO se reintenta.');
+        return; // No reconectar
+      }
+
+      if (statusCode === DisconnectReason.loggedOut) {
+        // Logout explícito — limpiar sesión y esperar nuevo QR
+        this.messageQueueService.pause('Sesión cerrada (401)');
         this.qr = '';
         this.qrBase64 = '';
-        this.logger.log('Logged out detected, clearing credentials from DB');
-        this.sessionModel.deleteOne({ instanceName: this.instanceName }).exec()
-          .then(() => this.whatsappGateway.sendLog('Session expired and cleared. Please scan again.'));
+        this.logger.log('[Connection] Logout detectado — eliminando credenciales de DB');
+        this.whatsappGateway.sendLog('Sesión cerrada. Escaneá el QR nuevamente para reconectar.');
+        this.sessionModel
+          .deleteOne({ instanceName: this.instanceName })
+          .exec()
+          .catch(() => {});
+        return;
       }
+
+      // Otros motivos de desconexión — reconectar con backoff exponencial
+      this.whatsappGateway.sendLog(
+        `Conexión perdida (código ${statusCode}). Reconectando con backoff...`,
+      );
+      this.scheduleReconnect();
+
     } else if (connection === 'open') {
+      // Resetear contador de reintentos al conectar exitosamente
+      this.reconnectAttempts = 0;
+      // Reanudar cola si estaba pausada por desconexión temporal
+      if (this.messageQueueService.paused) {
+        this.messageQueueService.resume();
+      }
       this.qr = '';
       this.qrBase64 = '';
-      this.whatsappGateway.sendLog('Connection opened successfully.');
-      this.logger.log('Connection opened successfully. QR cleared.');
+      this.whatsappGateway.sendLog('Conexión establecida correctamente.');
+      this.logger.log('[Connection] Abierta exitosamente. QR limpiado.');
     }
   }
 
@@ -677,83 +837,152 @@ export class WhatsappService implements OnModuleInit {
     };
   }
 
-  async sendText(to: string, text: string) {
-    try {
-      this.logger.log(`[sendText] Initiated to ${to}. Current status: ${this.status}`);
-      
-      if (this.status !== 'open') {
-        throw new Error(`WhatsApp no está conectado (estado actual: ${this.status})`);
-      }
-
-      if (!this.sock) {
-        throw new Error('WhatsApp socket is not initialized');
-      }
-
-      // If 'to' is already a JID, use it. Otherwise resolve the phone number.
-      // Prefer existing chat JID to avoid creating duplicate conversations (@lid vs @s.whatsapp.net).
-      let jid: string;
-      if (to.includes('@')) {
-        jid = to;
-      } else {
-        const phone = to.replace(/\D/g, '');
-        const existing = await this.chatModel.findOne({
-          jid: { $regex: phone },
-        }).lean();
-        jid = existing?.jid ?? `${phone}@s.whatsapp.net`;
-      }
-      this.logger.log(`[sendText] Resolved JID: ${jid}`);
-
-      // 1. Enviar mensaje por WhatsApp
-      await this.sock.sendMessage(jid, { text });
-      this.logger.log(`[sendText] Baileys sendMessage success for ${jid}`);
-
-      // 2. Guardar mensaje en MongoDB
-      const message = new this.messageModel({
-        jid,
-        fromMe: true,
-        type: 'conversation',
-        content: text,
-        timestamp: new Date(),
-      });
-
-      await message.save();
-      this.logger.log(`[sendText] Message saved to MongoDB for ${jid}`);
-
-      // 3. Actualizar último mensaje del chat (upsert — preservar name si ya existe)
-      const existingChat = await this.chatModel.findOne({ jid }).lean();
-      let contactName: string | undefined;
-      if (!existingChat?.name) {
-        // Try to resolve name from contact collection
-        const contact = await this.contactModel.findOne({ jid }).lean();
-        contactName = contact?.name ?? undefined;
-      }
-      await this.chatModel.updateOne(
-        { jid: jid },
-        {
-          $set: {
-            lastMessage: message,
-            ...(contactName && { name: contactName }),
-          },
-        },
-        { upsert: true },
-      );
-
-      // 4. Emitir evento WebSocket
-      const messageData = message.toJSON();
-      if (this.whatsappGateway && this.whatsappGateway.server) {
-        this.whatsappGateway.sendNewMessage(messageData);
-      } else {
-        this.logger.warn('[sendText] WhatsAppGateway not ready, skipping broadcast');
-      }
-
-      this.logger.log(`[Manual] Message sent to ${jid} via operator/API`);
-
-      return { success: true, message: messageData };
-    } catch (error) {
-      this.logger.error(`[sendText] Error: ${error.message}`, error.stack);
-      fs.appendFileSync('debug.log', `[${new Date().toISOString()}] sendText Error: ${error.message}\n${error.stack}\n`);
-      throw error;
+  /**
+   * Envía un mensaje de texto con humanización completa y gestión de cola.
+   *
+   * @param to      - Número o JID destino
+   * @param text    - Texto a enviar
+   * @param opts    - Opciones: priority (HIGH/NORMAL), incomingMessageKey (para marcar como leído)
+   *
+   * Para notificaciones proactivas/bulk usar sendBulkText() — no bloquea el caller.
+   */
+  async sendText(
+    to: string,
+    text: string,
+    opts: { priority?: MessagePriority; incomingMessageKey?: any } = {},
+  ) {
+    if (this.status !== 'open') {
+      throw new Error(`WhatsApp no está conectado (estado actual: ${this.status})`);
     }
+    if (!this.sock) {
+      throw new Error('WhatsApp socket no inicializado');
+    }
+
+    // Resolver JID antes de encolar para detectar problemas temprano
+    const jid = await this.resolveJid(to);
+    this.logger.log(`[sendText] Encolando para ${jid} (prioridad: ${opts.priority ?? 'HIGH'})`);
+
+    return this.messageQueueService.enqueue(
+      () => this.executeHumanizedSend(jid, text, opts.incomingMessageKey),
+      opts.priority ?? 'HIGH',
+    );
+  }
+
+  /**
+   * Encola una notificación proactiva con prioridad NORMAL (15-30s entre mensajes).
+   * Fire-and-forget: no espera a que el mensaje sea efectivamente enviado.
+   */
+  sendBulkText(to: string, text: string): void {
+    if (this.status !== 'open') {
+      this.logger.warn(`[sendBulk] Omitiendo (no conectado): ${to}`);
+      return;
+    }
+    void this.resolveJid(to).then((jid) => {
+      this.messageQueueService
+        .enqueue(() => this.executeHumanizedSend(jid, text), 'NORMAL')
+        .catch((err) =>
+          this.logger.error(`[sendBulk] Falló para ${jid}: ${err.message}`),
+        );
+    });
+  }
+
+  /**
+   * Ciclo de vida humanizado de un envío:
+   * 1. Marcar mensaje entrante como leído (si corresponde)
+   * 2. Activar estado "escribiendo..."
+   * 3. Delay dinámico que imita velocidad de tipeo humana
+   * 4. Enviar mensaje
+   * 5. Limpiar estado de presencia
+   * 6. Persistir en DB y emitir evento WS
+   */
+  private async executeHumanizedSend(
+    jid: string,
+    text: string,
+    incomingMessageKey?: any,
+  ): Promise<{ success: boolean; message: any }> {
+    // Paso C: Marcar mensaje entrante como leído antes de responder
+    if (incomingMessageKey) {
+      try {
+        await this.sock.readMessages([incomingMessageKey]);
+      } catch (e) {
+        this.logger.warn(`[Humanize] readMessages falló: ${e.message}`);
+      }
+    }
+
+    // Paso A: Activar estado "escribiendo..."
+    try {
+      await this.sock.sendPresenceUpdate('composing', jid);
+    } catch (e) {
+      this.logger.warn(`[Humanize] sendPresenceUpdate falló: ${e.message}`);
+    }
+
+    // Paso B: Delay dinámico — imita velocidad de tipeo humana (máx 8s)
+    const typingDelay = Math.min(
+      text.length * 50 + this.randomBetween(1_000, 3_000),
+      8_000,
+    );
+    await this.sleep(typingDelay);
+
+    // Enviar el mensaje
+    await this.sock.sendMessage(jid, { text });
+    this.logger.log(`[sendText] Mensaje enviado a ${jid}`);
+
+    // Limpiar estado de presencia (best-effort)
+    this.sock.sendPresenceUpdate('paused', jid).catch(() => {});
+
+    // Persistir en DB + emitir evento WebSocket
+    return this.persistOutgoingMessage(jid, text);
+  }
+
+  /** Resuelve un número de teléfono al JID correcto, preservando @lid si ya existe en chats. */
+  private async resolveJid(to: string): Promise<string> {
+    if (to.includes('@')) return to;
+    const phone = to.replace(/\D/g, '');
+    const existing = await this.chatModel
+      .findOne({ jid: { $regex: phone } })
+      .lean();
+    return existing?.jid ?? `${phone}@s.whatsapp.net`;
+  }
+
+  /** Guarda el mensaje saliente en MongoDB y emite el evento WebSocket. */
+  private async persistOutgoingMessage(
+    jid: string,
+    text: string,
+  ): Promise<{ success: boolean; message: any }> {
+    const message = new this.messageModel({
+      jid,
+      fromMe: true,
+      type: 'conversation',
+      content: text,
+      timestamp: new Date(),
+    });
+    await message.save();
+
+    const existingChat = await this.chatModel.findOne({ jid }).lean();
+    let contactName: string | undefined;
+    if (!existingChat?.name) {
+      const contact = await this.contactModel.findOne({ jid }).lean();
+      contactName = contact?.name ?? undefined;
+    }
+
+    await this.chatModel.updateOne(
+      { jid },
+      {
+        $set: {
+          lastMessage: message,
+          ...(contactName && { name: contactName }),
+        },
+      },
+      { upsert: true },
+    );
+
+    const messageData = message.toJSON();
+    if (this.whatsappGateway?.server) {
+      this.whatsappGateway.sendNewMessage(messageData);
+    }
+
+    this.logger.log(`[sendText] Persistido en DB y emitido WS para ${jid}`);
+    return { success: true, message: messageData };
   }
 
   async sendMediaUpload(
@@ -825,6 +1054,49 @@ export class WhatsappService implements OnModuleInit {
       this.logger.error(`[sendMedia] Error: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  // ─────────────────────────────────────────────
+  // Helpers anti-ban / utilidades internas
+  // ─────────────────────────────────────────────
+
+  /**
+   * Programa un reintento de conexión con backoff exponencial + jitter.
+   * Base: 5s → 10s → 20s → 40s … máx 120s. Máx 10 reintentos.
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      this.logger.error(
+        '[Reconnect] Máximo de reintentos alcanzado. Intervención manual requerida.',
+      );
+      this.whatsappGateway.sendStatus('failed');
+      this.whatsappGateway.sendLog(
+        'ERROR: Máximo de reintentos de conexión alcanzado. Revisá el servidor.',
+      );
+      return;
+    }
+
+    const base = this.BASE_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempts);
+    const jitter = Math.floor(Math.random() * 2_000);
+    const delay = Math.min(base + jitter, 120_000);
+
+    this.reconnectAttempts++;
+    this.logger.warn(
+      `[Reconnect] Intento ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS} en ${Math.round(delay / 1000)}s`,
+    );
+    this.whatsappGateway.sendLog(
+      `Reconectando en ${Math.round(delay / 1000)}s (intento ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})...`,
+    );
+
+    setTimeout(() => this.connect(), delay);
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  private randomBetween(min: number, max: number): number {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 
   async disconnect() {

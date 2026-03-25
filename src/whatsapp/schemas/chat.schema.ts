@@ -41,6 +41,13 @@ export class Chat extends Document {
 
   @Prop({ default: null })
   operatorCompanyId: string | null;
+
+  // ===== Showing pre-qualification state =====
+  @Prop({ default: null })
+  activeShowingCaseId: string | null;
+
+  @Prop({ type: [String], default: [] })
+  showingDocsReceived: string[]; // e.g. ['titular', 'garante']
 }
 
 export const ChatSchema = SchemaFactory.createForClass(Chat);

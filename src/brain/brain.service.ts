@@ -10,6 +10,7 @@ import { Message } from '../whatsapp/schemas/message.schema';
 import { Chat } from '../whatsapp/schemas/chat.schema';
 import { AiConfig } from './schemas/ai-config.schema';
 import { getSystemPrompt, SYSTEM_PROMPT_BASE } from './prompts/system-prompt';
+import { RequestShowingTool } from './tools/request-showing.tool';
 import { AccountStatusTool } from './tools/account-status.tool';
 import { CreateComplaintTool } from './tools/create-complaint.tool';
 import { VerifyIdentityTool } from './tools/verify-identity.tool';
@@ -49,6 +50,7 @@ export class BrainService {
     private readonly requestAppraisalTool: RequestAppraisalTool,
     private readonly getAvailableCitiesTool: GetAvailableCitiesTool,
     private readonly createLeadTool: CreateLeadTool,
+    private readonly requestShowingTool: RequestShowingTool,
   ) {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
 
@@ -128,6 +130,7 @@ export class BrainService {
               this.requestAppraisalTool.declaration,
               this.getAvailableCitiesTool.declaration,
               this.createLeadTool.declaration,
+              this.requestShowingTool.declaration,
             ],
           },
         ],
@@ -149,7 +152,14 @@ export class BrainService {
         userContext = `\n### CURRENT USER CONTEXT\nEstado: INVITADO (No Registrado) ⚠️\nRestricciones: NO puede acceder a datos sensibles. Debe validar identidad primero.\n`;
       }
 
-      const systemPrompt = basePrompt + userContext;
+      const nowAR = new Date().toLocaleDateString('es-AR', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+        timeZone: 'America/Argentina/Buenos_Aires',
+      });
+      const isoNow = new Date().toISOString().slice(0, 10);
+      const dateContext = `\n### FECHA Y HORA ACTUAL\nHoy es **${nowAR}** (${isoNow}). Usá este año (${isoNow.slice(0,4)}) al resolver fechas relativas como "el viernes" o "la próxima semana".\n`;
+
+      const systemPrompt = basePrompt + dateContext + userContext;
 
       const chat = model.startChat({
         history: [
@@ -218,6 +228,15 @@ export class BrainService {
               break;
             case 'create_crm_lead':
               toolResult = await this.createLeadTool.execute(call.args as any, { coreClientId, jid });
+              break;
+            case 'request_showing':
+              toolResult = await this.requestShowingTool.execute(call.args as any, { coreClientId, jid });
+              if (toolResult.success && toolResult.caseId) {
+                await this.chatModel.updateOne(
+                  { jid },
+                  { $set: { activeShowingCaseId: toolResult.caseId, showingDocsReceived: [] } },
+                );
+              }
               break;
             default:
               this.logger.error(`[Brain] Tool not found or not implemented: ${call.name}`);

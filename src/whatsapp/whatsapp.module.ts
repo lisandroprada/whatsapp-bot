@@ -4,6 +4,7 @@ import { WhatsappController } from './whatsapp.controller';
 import { WhatsappService } from './whatsapp.service';
 import { WhatsappGateway } from './whatsapp.gateway';
 import { WhatsAppClientService } from './services/whatsapp-client.service';
+import { MessageQueueService } from './services/message-queue.service';
 import {
   WhatsappSession,
   WhatsappSessionSchema,
@@ -24,7 +25,7 @@ import { BrainModule } from '../brain/brain.module';
     BrainModule,
   ],
   controllers: [WhatsappController],
-  providers: [WhatsappService, WhatsappGateway, WhatsAppClientService],
+  providers: [WhatsappService, WhatsappGateway, WhatsAppClientService, MessageQueueService],
   exports: [WhatsAppClientService],
 })
 export class WhatsappModule {}

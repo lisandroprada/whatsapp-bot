@@ -26,7 +26,7 @@ export class ScheduleMeetingTool {
         },
         preferredDate: {
           type: SchemaType.STRING,
-          description: 'Fecha preferida (formato texto, ej: "lunes por la tarde", "mañana a las 10am").',
+          description: 'Fecha y hora de la visita en formato ISO 8601 (ej: "2026-03-20T12:00:00"). Resolvé expresiones relativas como "viernes al mediodía" o "mañana a las 10" a una fecha absoluta usando la fecha actual del sistema.',
         },
         clientName: {
           type: SchemaType.STRING,

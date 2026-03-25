@@ -295,6 +295,74 @@ export class CoreBackendService {
   }
 
   /**
+   * Crear un agente PROSPECT provisional para un usuario desconocido
+   * Endpoint Core: POST /api/v1/bot/prospects
+   */
+  async createProspect(data: { name: string; phone: string; jid?: string }) {
+    if (this.useMock) {
+      const id = Math.random().toString(16).slice(2, 10).toUpperCase();
+      return { id: `mock-${id}`, documentNumber: `PROSPECT-${id}`, name: data.name };
+    }
+
+    try {
+      const response = await this.client.post('/api/v1/bot/prospects', data);
+      return response.data;
+    } catch (error) {
+      this.logger.error('Failed to create prospect', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Iniciar solicitud de visita (pre-calificación)
+   * Endpoint Core: POST /api/v1/bot/showings/request
+   */
+  async requestShowing(data: {
+    propertyId?: string;
+    propertyAddress?: string;
+    preferredDate?: string;
+    clientName?: string;
+    clientJid?: string;
+    clientCoreId?: string;
+  }) {
+    if (this.useMock) {
+      return this.mockService.requestShowing(data);
+    }
+
+    try {
+      const response = await this.client.post('/api/v1/bot/showings/request', data);
+      return response.data;
+    } catch (error) {
+      this.logger.error('Failed to request showing', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Adjuntar documento de pre-calificación a un caso
+   * Endpoint Core: POST /api/v1/bot/showings/:caseId/documents
+   */
+  async attachShowingDocument(
+    caseId: string,
+    data: { docType: string; fileUrl: string; fileName: string },
+  ) {
+    if (this.useMock) {
+      return { success: true };
+    }
+
+    try {
+      const response = await this.client.post(
+        `/api/v1/bot/showings/${caseId}/documents`,
+        data,
+      );
+      return response.data;
+    } catch (error) {
+      this.logger.error('Failed to attach showing document', error);
+      throw error;
+    }
+  }
+
+  /**
    * Probar envío de email
    * Endpoint Core: POST /api/v1/email/test
    */
@@ -325,7 +393,7 @@ export class CoreBackendService {
     }
 
     try {
-      const response = await this.client.post('/api/showings', data);
+      const response = await this.client.post('/api/v1/bot/showings', data);
       return response.data;
     } catch (error) {
       this.logger.error('Failed to schedule showing', error);

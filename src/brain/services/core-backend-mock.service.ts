@@ -251,6 +251,18 @@ export class CoreBackendMockService {
   }
 
   /**
+   * Mock: Solicitud de visita con pre-calificación
+   */
+  async requestShowing(data: any) {
+    this.logger.log(`[MOCK] requestShowing:`, data);
+    return {
+      success: true,
+      caseId: `mock-case-${Date.now()}`,
+      message: 'Solicitud de visita registrada (mock).',
+    };
+  }
+
+  /**
    * Mock: Agendar visita (futuro)
    */
   async scheduleShowing(data: any) {
