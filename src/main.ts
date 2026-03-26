@@ -12,6 +12,8 @@ async function bootstrap() {
       'http://localhost:8080',
       'http://localhost:5173',
       'http://127.0.0.1:3010',
+      'https://rentia.com.ar',
+      'https://www.rentia.com.ar',
     ],
     credentials: true,
   });
