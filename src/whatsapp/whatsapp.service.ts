@@ -62,7 +62,17 @@ export class WhatsappService implements OnModuleInit {
     this.connect();
   }
 
+  /**
+   * Conexión manual (desde UI o al iniciar el módulo).
+   * Siempre resetea el contador de reintentos para que no quede bloqueado
+   * tras una racha de fallos automáticos previos.
+   */
   async connect() {
+    this.reconnectAttempts = 0;
+    return this._doConnect();
+  }
+
+  private async _doConnect() {
     try {
       if (this.status === 'open' || this.status === 'connecting') {
         this.logger.log('Connection already in progress or open.');
@@ -95,7 +105,7 @@ export class WhatsappService implements OnModuleInit {
       } catch (e) {
         this.logger.warn(`Failed to fetch latest version, using fallback. Error: ${e.message}`);
       }
-      
+
       this.sock = makeWASocket({
         version,
         auth: {
@@ -110,13 +120,10 @@ export class WhatsappService implements OnModuleInit {
         markOnlineOnConnect: false,
       });
 
-      this.sock.ev.on(
-        'connection.update',
-        (update: any) => {
-          this.logger.log(`[ConnectionUpdate] ${JSON.stringify(update)}`);
-          this.handleConnectionUpdate(update);
-        },
-      );
+      this.sock.ev.on('connection.update', (update: any) => {
+        this.logger.log(`[ConnectionUpdate] ${JSON.stringify(update)}`);
+        this.handleConnectionUpdate(update);
+      });
       this.sock.ev.on('creds.update', saveCreds);
       this.sock.ev.on('messages.upsert', this.handleMessagesUpsert.bind(this));
 
@@ -818,6 +825,15 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
+      // Código 515: WhatsApp pide reinicio limpio del socket
+      if (statusCode === 515) {
+        this.logger.warn('[Connection] Código 515 (restart required) — reconectando inmediatamente');
+        this.whatsappGateway.sendLog('Reconexión requerida por el servidor (515)...');
+        this.status = 'close';
+        setTimeout(() => this._doConnect(), 2_000);
+        return;
+      }
+
       // Otros motivos de desconexión — reconectar con backoff exponencial
       this.whatsappGateway.sendLog(
         `Conexión perdida (código ${statusCode}). Reconectando con backoff...`,
@@ -1109,7 +1125,7 @@ export class WhatsappService implements OnModuleInit {
       `Reconectando en ${Math.round(delay / 1000)}s (intento ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})...`,
     );
 
-    setTimeout(() => this.connect(), delay);
+    setTimeout(() => this._doConnect(), delay);
   }
 
   private sleep(ms: number): Promise<void> {
