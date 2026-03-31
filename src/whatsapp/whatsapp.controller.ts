@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Put,
+  Patch,
   Body,
   Param,
   UseGuards,
@@ -37,6 +38,13 @@ export class WhatsappController {
   @Get('session/status')
   getStatus() {
     return this.whatsappService.getStatus();
+  }
+
+  /** Activar o desactivar el brain de IA globalmente */
+  @Patch('bot')
+  @UseGuards(ApiKeyGuard)
+  setBotEnabled(@Body() body: { enabled: boolean }) {
+    return this.whatsappService.setBotEnabled(body.enabled);
   }
 
   @Post('session/disconnect')

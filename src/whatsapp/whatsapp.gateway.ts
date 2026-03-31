@@ -45,4 +45,8 @@ export class WhatsappGateway {
   sendLog(message: string) {
     this.server.emit('log', { message });
   }
+
+  sendBotStatus(botEnabled: boolean) {
+    this.server.emit('bot-status', { botEnabled });
+  }
 }

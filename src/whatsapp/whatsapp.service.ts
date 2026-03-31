@@ -41,6 +41,9 @@ export class WhatsappService implements OnModuleInit {
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
   private readonly BASE_RECONNECT_DELAY_MS = 5_000;
 
+  // --- Control global del brain de IA ---
+  private isBotGloballyEnabled = true;
+
   constructor(
     @InjectModel(WhatsappSession.name)
     private readonly sessionModel: Model<WhatsappSession>,
@@ -467,6 +470,12 @@ export class WhatsappService implements OnModuleInit {
    */
   private async processByBrain(message: any, jid: string) {
     try {
+      // Guard global: si el brain está desactivado, no responder en ningún chat
+      if (!this.isBotGloballyEnabled) {
+        this.logger.log(`[Brain] Bot desactivado globalmente, ignorando mensaje de ${jid}`);
+        return;
+      }
+
       // 1. Buscar o crear chat
       let chat = await this.chatModel.findOne({ jid });
 
@@ -830,11 +839,23 @@ export class WhatsappService implements OnModuleInit {
   }
 
   getStatus() {
-    return { 
-      status: this.status, 
+    return {
+      status: this.status,
       qr: this.qrBase64,
-      hasQr: !!this.qrBase64 
+      hasQr: !!this.qrBase64,
+      botEnabled: this.isBotGloballyEnabled,
     };
+  }
+
+  setBotEnabled(enabled: boolean) {
+    this.isBotGloballyEnabled = enabled;
+    const msg = enabled
+      ? 'Bot de IA activado globalmente.'
+      : 'Bot de IA desactivado. Las conversaciones deben ser atendidas manualmente.';
+    this.logger.log(`[Brain] ${msg}`);
+    this.whatsappGateway.sendLog(msg);
+    this.whatsappGateway.sendBotStatus(enabled);
+    return { botEnabled: this.isBotGloballyEnabled };
   }
 
   /**
