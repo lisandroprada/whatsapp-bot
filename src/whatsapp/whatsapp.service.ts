@@ -8,7 +8,6 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   BufferJSON,
   downloadMediaMessage,
-  Browsers,
 } from '@whiskeysockets/baileys';
 import { initAuthCreds } from '@whiskeysockets/baileys/lib/Utils/auth-utils';
 import { Boom } from '@hapi/boom';
@@ -114,8 +113,6 @@ export class WhatsappService implements OnModuleInit {
         },
         printQRInTerminal: false,
         logger: pinoLogger as any,
-        // Anti-ban: identidad de dispositivo realista
-        browser: Browsers.macOS('Chrome'),
       });
 
       this.sock.ev.on('connection.update', (update: any) => {
