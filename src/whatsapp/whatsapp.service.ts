@@ -116,8 +116,6 @@ export class WhatsappService implements OnModuleInit {
         logger: pinoLogger as any,
         // Anti-ban: identidad de dispositivo realista
         browser: Browsers.macOS('Chrome'),
-        // Anti-ban: no anunciar presencia "online" al conectar
-        markOnlineOnConnect: false,
       });
 
       this.sock.ev.on('connection.update', (update: any) => {
