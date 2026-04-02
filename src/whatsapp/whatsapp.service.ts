@@ -77,6 +77,16 @@ export class WhatsappService implements OnModuleInit {
         this.logger.log('Connection already in progress or open.');
         return { status: this.status };
       }
+
+      // Destruir socket anterior si existe para evitar instancias zombie
+      if (this.sock) {
+        try {
+          this.sock.ev.removeAllListeners();
+          this.sock.ws?.close();
+        } catch (_) {}
+        this.sock = null;
+      }
+
       this.status = 'connecting';
       this.whatsappGateway.sendStatus(this.status);
       this.whatsappGateway.sendLog('Starting connection...');
@@ -822,10 +832,13 @@ export class WhatsappService implements OnModuleInit {
 
       // Código 515: WhatsApp pide reinicio limpio del socket
       if (statusCode === 515) {
-        this.logger.warn('[Connection] Código 515 (restart required) — reconectando inmediatamente');
-        this.whatsappGateway.sendLog('Reconexión requerida por el servidor (515)...');
+        this.logger.warn('[Connection] Código 515 (restart required) — reconectando en 8s');
         this.status = 'close';
-        setTimeout(() => this._doConnect(), 2_000);
+        this.qr = '';
+        this.qrBase64 = '';
+        this.whatsappGateway.sendLog('QR inválido — generando nuevo código QR en 8 segundos...');
+        this.whatsappGateway.sendStatus('close');
+        setTimeout(() => this._doConnect(), 8_000);
         return;
       }
 
