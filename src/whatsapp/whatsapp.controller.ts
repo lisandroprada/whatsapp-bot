@@ -4,6 +4,7 @@ import {
   Get,
   Put,
   Patch,
+  Delete,
   Body,
   Param,
   UseGuards,
@@ -261,5 +262,43 @@ export class WhatsappController {
         ? 'Número de Chubut válido para WhatsApp'
         : 'No es un número móvil de Chubut',
     };
+  }
+
+  // ─── Admin / DB Management ────────────────────────────────────────────────
+
+  @Get('admin/stats')
+  @UseGuards(ApiKeyGuard)
+  getAdminStats() {
+    return this.whatsappService.getAdminStats();
+  }
+
+  @Get('admin/export')
+  @UseGuards(ApiKeyGuard)
+  exportMessages() {
+    return this.whatsappService.exportMessages();
+  }
+
+  @Delete('admin/messages')
+  @UseGuards(ApiKeyGuard)
+  clearMessages() {
+    return this.whatsappService.clearMessages();
+  }
+
+  @Delete('admin/chats')
+  @UseGuards(ApiKeyGuard)
+  clearChats() {
+    return this.whatsappService.clearChats();
+  }
+
+  @Delete('admin/contacts')
+  @UseGuards(ApiKeyGuard)
+  clearContacts() {
+    return this.whatsappService.clearContacts();
+  }
+
+  @Delete('admin/all')
+  @UseGuards(ApiKeyGuard)
+  clearAll() {
+    return this.whatsappService.clearAll();
   }
 }

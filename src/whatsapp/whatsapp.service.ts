@@ -1242,4 +1242,58 @@ export class WhatsappService implements OnModuleInit {
   async getMessages(jid: string) {
     return this.messageModel.find({ jid }).sort({ timestamp: 1 }).lean();
   }
+
+  // ─── Admin / DB Management ────────────────────────────────────────────────
+
+  async getAdminStats() {
+    const [chats, messages, contacts] = await Promise.all([
+      this.chatModel.countDocuments(),
+      this.messageModel.countDocuments(),
+      this.contactModel.countDocuments(),
+    ]);
+    return { chats, messages, contacts };
+  }
+
+  async exportMessages() {
+    const messages = await this.messageModel
+      .find()
+      .sort({ timestamp: 1 })
+      .lean();
+    const chats = await this.chatModel.find().lean();
+    return { exportedAt: new Date().toISOString(), chats, messages };
+  }
+
+  async clearMessages() {
+    const result = await this.messageModel.deleteMany({});
+    this.logger.warn(`Admin: deleted ${result.deletedCount} messages`);
+    return { deleted: result.deletedCount };
+  }
+
+  async clearChats() {
+    const result = await this.chatModel.deleteMany({});
+    this.logger.warn(`Admin: deleted ${result.deletedCount} chats`);
+    return { deleted: result.deletedCount };
+  }
+
+  async clearContacts() {
+    const result = await this.contactModel.deleteMany({});
+    this.logger.warn(`Admin: deleted ${result.deletedCount} contacts`);
+    return { deleted: result.deletedCount };
+  }
+
+  async clearAll() {
+    const [msgs, chts, conts] = await Promise.all([
+      this.messageModel.deleteMany({}),
+      this.chatModel.deleteMany({}),
+      this.contactModel.deleteMany({}),
+    ]);
+    this.logger.warn(
+      `Admin: full DB wipe — messages:${msgs.deletedCount} chats:${chts.deletedCount} contacts:${conts.deletedCount}`,
+    );
+    return {
+      messages: msgs.deletedCount,
+      chats: chts.deletedCount,
+      contacts: conts.deletedCount,
+    };
+  }
 }
