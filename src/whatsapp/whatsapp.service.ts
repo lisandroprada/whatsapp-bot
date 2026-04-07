@@ -43,6 +43,9 @@ export class WhatsappService implements OnModuleInit {
   // --- Control global del brain de IA ---
   private isBotGloballyEnabled = true;
 
+  // --- Mapa LID → JID real (@s.whatsapp.net) para multi-device ---
+  private readonly lidToJidMap = new Map<string, string>();
+
   constructor(
     @InjectModel(WhatsappSession.name)
     private readonly sessionModel: Model<WhatsappSession>,
@@ -132,12 +135,44 @@ export class WhatsappService implements OnModuleInit {
       this.sock.ev.on('creds.update', saveCreds);
       this.sock.ev.on('messages.upsert', this.handleMessagesUpsert.bind(this));
 
+      // Mapear LID → JID real para soporte multi-device
+      this.sock.ev.on('contacts.upsert', (contacts: any[]) => {
+        for (const contact of contacts) {
+          if (contact.lid && contact.id?.endsWith('@s.whatsapp.net')) {
+            this.lidToJidMap.set(contact.lid, contact.id);
+          }
+        }
+      });
+      this.sock.ev.on('contacts.update', (contacts: any[]) => {
+        for (const contact of contacts) {
+          if (contact.lid && contact.id?.endsWith('@s.whatsapp.net')) {
+            this.lidToJidMap.set(contact.lid, contact.id);
+          }
+        }
+      });
+
       return { status: 'connecting' };
     } catch (error) {
       this.logger.error(`[Connect ERROR] ${error.message}`);
       this.status = 'close';
       return { status: 'error', message: error.message };
     }
+  }
+
+  private resolveLid(jid: string): string {
+    if (!jid?.endsWith('@lid')) return jid;
+    // Buscar en el mapa cargado desde contacts.upsert
+    if (this.lidToJidMap.has(jid)) return this.lidToJidMap.get(jid)!;
+    // Fallback: buscar en sock.contacts (populado por Baileys internamente)
+    const sockContacts = this.sock?.contacts || {};
+    for (const [contactJid, contact] of Object.entries(sockContacts)) {
+      if ((contact as any)?.lid === jid && contactJid.endsWith('@s.whatsapp.net')) {
+        this.lidToJidMap.set(jid, contactJid); // cachear para próximas veces
+        return contactJid;
+      }
+    }
+    this.logger.warn(`[LID] No se pudo resolver ${jid} a JID real`);
+    return jid;
   }
 
   private async handleMessagesUpsert(m: any) {
@@ -151,7 +186,7 @@ export class WhatsappService implements OnModuleInit {
       return;
     }
 
-    const jid = message.key.remoteJid;
+    const jid = this.resolveLid(message.key.remoteJid);
     const messageType = Object.keys(message.message || {})[0];
     let content = 'Unsupported message type';
 
@@ -282,10 +317,94 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
-      // Comando: /modo-operador — activa el modo interno (requiere ser User del sistema)
-      if (content.trim().toLowerCase() === '/modo-operador') {
-        const identity = await this.identityResolverService.resolve(jid);
+      // Comando: /mi-jid — devuelve el JID exacto del remitente (diagnóstico)
+      if (content.trim().toLowerCase() === '/mi-jid') {
+        const rawJid = message.key.remoteJid;
+        const sockContact = this.sock?.contacts?.[rawJid];
+        const mapResult = this.lidToJidMap.get(rawJid) || '(no mapeado)';
+        // Buscar en sock.contacts por lid coincidente
+        const sockContacts = this.sock?.contacts || {};
+        const byLid = Object.entries(sockContacts).find(
+          ([, c]: any) => c?.lid === rawJid
+        );
+        await this.sendText(
+          jid,
+          `🔍 *Debug JID*\n` +
+          `• raw: \`${rawJid}\`\n` +
+          `• resolved: \`${jid}\`\n` +
+          `• lidMap: ${mapResult}\n` +
+          `• sock.contacts[raw]: ${sockContact ? JSON.stringify(sockContact) : '(vacío)'}\n` +
+          `• byLid search: ${byLid ? byLid[0] : '(no encontrado)'}\n` +
+          `• lidMap size: ${this.lidToJidMap.size}\n` +
+          `• pushName: ${message.pushName || '(sin nombre)'}`
+        );
+        return;
+      }
 
+      // Comando: /modo-operador — activa el modo interno (requiere ser User del sistema)
+      // Soporta @lid (multi-device): /modo-operador +5492804503151
+      if (content.trim().toLowerCase().startsWith('/modo-operador')) {
+        const rawJid = message.key.remoteJid;
+        const isLid = rawJid?.endsWith('@lid');
+        const parts = content.trim().split(/\s+/);
+        const phoneArg = parts[1]; // opcional: número de teléfono
+
+        // Si es @lid sin teléfono, verificar primero si ya está cacheado
+        if (isLid && !phoneArg) {
+          const cached = await this.identityResolverService.resolve(jid);
+          if (!cached.isOperator) {
+            await this.sendText(
+              jid,
+              '🔐 *Verificación requerida*\n\nTu número usa el formato multi-device de WhatsApp. Para verificar tu identidad, reenviá el comando con tu número:\n\n`/modo-operador +5492804503151`',
+            );
+            return;
+          }
+          // Ya está cacheado — activar directamente
+          this.logger.log(`[Cmd] /modo-operador activado para ${jid} (${cached.operatorData?.name}) [cache @lid]`);
+          await this.sendText(
+            jid,
+            `✅ *Modo operador activado*\n\nHola ${cached.operatorData?.name}. Podés pedirme tareas pendientes, crear órdenes de trabajo o buscar propiedades.\n\nEscribí */modo-cliente* para volver al modo externo.`,
+          );
+          return;
+        }
+
+        // Flujo @lid + teléfono: llamar al backend directamente para evitar
+        // crear un chat document bajo el JID @s.whatsapp.net derivado
+        if (isLid && phoneArg) {
+          const cleanPhone = phoneArg.replace(/\D/g, '');
+          const phoneJid = `${cleanPhone}@s.whatsapp.net`;
+          const result = await this.coreBackendService.resolveOperator(phoneJid);
+          if (result.isOperator) {
+            await this.chatModel.updateOne(
+              { jid },
+              {
+                $set: {
+                  isOperator: true,
+                  operatorAgentId: result.agentId,
+                  operatorUserId: result.userId ?? result.agentId,
+                  operatorCompanyId: result.companyId,
+                  name: result.name,
+                },
+              },
+              { upsert: true },
+            );
+            this.logger.log(`[Cmd] /modo-operador activado para ${jid} (${result.name}) [via @lid+phone]`);
+            await this.sendText(
+              jid,
+              `✅ *Modo operador activado*\n\nHola ${result.name}. Podés pedirme tareas pendientes, crear órdenes de trabajo o buscar propiedades.\n\nEscribí */modo-cliente* para volver al modo externo.`,
+            );
+          } else {
+            this.logger.log(`[Cmd] /modo-operador denegado para ${jid} (teléfono no registrado)`);
+            await this.sendText(
+              jid,
+              '⛔ No tenés permisos para activar el modo operador. Este número no está registrado como usuario del sistema.',
+            );
+          }
+          return;
+        }
+
+        // Flujo normal @s.whatsapp.net
+        const identity = await this.identityResolverService.resolve(jid);
         if (identity.isOperator) {
           this.logger.log(`[Cmd] /modo-operador activado para ${jid} (${identity.operatorData?.name})`);
           await this.sendText(
@@ -1222,8 +1341,8 @@ export class WhatsappService implements OnModuleInit {
         throw new Error('WhatsApp socket not initialized');
       }
       
-      // Ensure JID is in correct format
-      const formattedJid = jid.includes('@s.whatsapp.net') ? jid : `${jid}@s.whatsapp.net`;
+      // Ensure JID is in correct format — preserve @lid and @g.us as-is
+      const formattedJid = jid.includes('@') ? jid : `${jid}@s.whatsapp.net`;
       
       const ppUrl = await this.sock.profilePictureUrl(formattedJid, 'image');
       return ppUrl;
