@@ -301,4 +301,10 @@ export class WhatsappController {
   clearAll() {
     return this.whatsappService.clearAll();
   }
+
+  @Get('admin/debug/resolve/:jid')
+  @UseGuards(ApiKeyGuard)
+  debugResolveOperator(@Param('jid') jid: string) {
+    return this.whatsappService.debugResolveOperator(jid);
+  }
 }

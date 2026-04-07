@@ -13,6 +13,7 @@ export class CoreBackendService {
   private readonly client: AxiosInstance;
   private readonly useMock: boolean;
   private readonly mockService: CoreBackendMockService;
+  private readonly baseURL: string;
 
   constructor() {
     const baseURL = process.env.CORE_BACKEND_URL;
@@ -21,6 +22,7 @@ export class CoreBackendService {
     // Determinar si usar mock
     this.useMock =
       !baseURL || !apiKey || apiKey === 'development-key-temp-mock';
+    this.baseURL = baseURL || 'http://localhost:3050';
 
     if (this.useMock) {
       this.logger.warn(
@@ -706,5 +708,17 @@ export class CoreBackendService {
       this.logger.error('Failed to create lead in Core', error);
       throw error;
     }
+  }
+
+  getDebugInfo() {
+    return {
+      useMock: this.useMock,
+      baseURL: this.baseURL,
+      envVars: {
+        CORE_BACKEND_URL: process.env.CORE_BACKEND_URL || '(not set)',
+        WHATSAPP_BOT_API_KEY: process.env.WHATSAPP_BOT_API_KEY
+          ? `${process.env.WHATSAPP_BOT_API_KEY.slice(0, 6)}...` : '(not set)',
+      },
+    };
   }
 }

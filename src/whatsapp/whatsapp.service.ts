@@ -1296,4 +1296,15 @@ export class WhatsappService implements OnModuleInit {
       contacts: conts.deletedCount,
     };
   }
+
+  async debugResolveOperator(jid: string) {
+    const backendInfo = this.coreBackendService.getDebugInfo();
+    const backendResult = await this.coreBackendService.resolveOperator(jid);
+    const identityResult = await this.identityResolverService.resolve(jid);
+    return {
+      backend: backendInfo,
+      resolveOperator: backendResult,
+      identityResolver: identityResult,
+    };
+  }
 }
