@@ -384,6 +384,8 @@ export class WhatsappService implements OnModuleInit {
                   operatorUserId: result.userId ?? result.agentId,
                   operatorCompanyId: result.companyId,
                   name: result.name,
+                  mode: 'BOT',
+                  isBotActive: true,
                 },
               },
               { upsert: true },
@@ -425,7 +427,7 @@ export class WhatsappService implements OnModuleInit {
       if (content.trim().toLowerCase() === '/modo-cliente') {
         await this.chatModel.updateOne(
           { jid },
-          { $set: { isOperator: false, operatorAgentId: null } },
+          { $set: { isOperator: false, operatorAgentId: null, mode: 'BOT', isBotActive: true } },
         );
         this.logger.log(`[Cmd] /modo-cliente activado para ${jid}`);
         await this.sendText(
@@ -494,6 +496,18 @@ export class WhatsappService implements OnModuleInit {
     } catch (error) {
       this.logger.error('Failed to process message upsert', error);
     }
+  }
+
+  /**
+   * Reactivar bot para un chat en modo HUMAN (usado desde el backoffice).
+   */
+  async resumeBot(jid: string) {
+    await this.chatModel.updateOne(
+      { jid },
+      { $set: { mode: 'BOT', isBotActive: true } },
+    );
+    this.logger.log(`[Handoff] Bot reactivado para ${jid} desde backoffice`);
+    return { success: true, jid };
   }
 
   async markAsRead(jid: string) {
@@ -710,6 +724,15 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
+      // 8b. Detección de Human Handoff explícito: si el usuario escribe "ASESOR"
+      // activamos el handoff inmediatamente sin pasar por la IA
+      const isHandoffRequest = /^asesor$/i.test(textContent.trim());
+      if (isHandoffRequest) {
+        this.logger.log(`[Brain] Human handoff requested by ${jid}`);
+        await this.triggerHumanHandoff(jid, clientName || message.pushName || jid, (chat as any).operatorCompanyId);
+        return;
+      }
+
       // 9. Procesar con Brain (cliente externo)
       this.logger.log(
         `[Brain] Processing message for ${clientName || jid} (${isRegistered ? 'REGISTERED' : 'GUEST'})`,
@@ -801,6 +824,69 @@ export class WhatsappService implements OnModuleInit {
       }
     } catch (error) {
       this.logger.warn(`[AutoLink] Could not link/create ${jid}:`, error.message);
+    }
+  }
+
+  /**
+   * Ejecuta el handoff humano:
+   * 1. Cambia el chat a mode: 'HUMAN' (bot deja de responder)
+   * 2. Emite evento WebSocket al backoffice
+   * 3. Envía WhatsApp a cada operador registrado
+   * 4. Confirma al cliente que un asesor lo atenderá
+   */
+  private async triggerHumanHandoff(jid: string, clientName: string, companyId?: string) {
+    try {
+      // 1. Deshabilitar bot para este chat
+      await this.chatModel.updateOne(
+        { jid },
+        { $set: { mode: 'HUMAN', isBotActive: false } },
+      );
+
+      // 2. Notificar al backoffice via WebSocket
+      this.whatsappGateway.sendHumanHandoff({
+        jid,
+        clientName,
+        timestamp: new Date().toISOString(),
+      });
+
+      // 3. Mensaje de confirmación al cliente
+      await this.sendText(
+        jid,
+        `👤 *Conectando con un asesor*\n\nEn breve uno de nuestros asesores se comunicará con vos. ¡Muchas gracias por tu paciencia! 🏠`,
+      );
+
+      // 4. Notificar a operadores via WhatsApp
+      // Primero buscamos operadores en MongoDB (los que ya usaron /modo-operador)
+      const operatorChats = await this.chatModel.find({ isOperator: true });
+      const operatorJids: string[] = operatorChats.map((c) => c.jid);
+
+      // También consultamos el backend para obtener operadores con teléfonos registrados
+      const backendOperators = await this.coreBackendService.getOperators(companyId);
+      for (const op of backendOperators) {
+        const opJid = `${op.phone}@s.whatsapp.net`;
+        // Evitar duplicados con los de MongoDB
+        if (!operatorJids.includes(opJid)) {
+          operatorJids.push(opJid);
+        }
+      }
+
+      const notificationText =
+        `🔔 *Solicitud de asesor*\n\n` +
+        `El contacto *${clientName}* está solicitando atención humana por WhatsApp.\n\n` +
+        `JID: \`${jid}\`\n\n` +
+        `Podés retomar la conversación desde el backoffice.`;
+
+      for (const opJid of operatorJids) {
+        try {
+          await this.sendText(opJid, notificationText);
+        } catch (err) {
+          this.logger.warn(`[Handoff] No se pudo notificar al operador ${opJid}: ${err.message}`);
+        }
+      }
+
+      this.logger.log(`[Handoff] Human handoff activado para ${jid} (${clientName}). Operadores notificados: ${operatorJids.length}`);
+    } catch (error) {
+      this.logger.error(`[Handoff] Error en triggerHumanHandoff para ${jid}:`, error);
     }
   }
 

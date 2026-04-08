@@ -105,6 +105,13 @@ export class WhatsappController {
     return this.whatsappService.markAsRead(jid);
   }
 
+  /** Reactivar el bot para un chat que está en modo HUMAN */
+  @Patch('bot/resume/:jid')
+  @UseGuards(ApiKeyGuard)
+  resumeBot(@Param('jid') jid: string) {
+    return this.whatsappService.resumeBot(jid);
+  }
+
   // ========== Gestión de Números WhatsApp ==========
 
   /**

@@ -710,6 +710,28 @@ export class CoreBackendService {
     }
   }
 
+  /**
+   * Get all active operators (admins) with WhatsApp-capable phones.
+   * Used to notify them on human-handoff.
+   * Endpoint Core: GET /api/v1/bot/operators?companyId=
+   */
+  async getOperators(companyId?: string): Promise<Array<{ userId: string; agentId: string | null; name: string; phone: string; companyId: string }>> {
+    if (this.useMock) {
+      return [
+        { userId: 'mock-user-1', agentId: 'mock-agent-1', name: 'Operador Mock', phone: '5492804503151', companyId: 'mock-company' },
+      ];
+    }
+
+    try {
+      const params = companyId ? { companyId } : {};
+      const response = await this.client.get('/api/v1/bot/operators', { params });
+      return response.data ?? [];
+    } catch (error) {
+      this.logger.error('Failed to get operators', error);
+      return [];
+    }
+  }
+
   getDebugInfo() {
     return {
       useMock: this.useMock,

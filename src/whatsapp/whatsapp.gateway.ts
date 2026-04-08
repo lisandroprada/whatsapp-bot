@@ -49,4 +49,8 @@ export class WhatsappGateway {
   sendBotStatus(botEnabled: boolean) {
     this.server.emit('bot-status', { botEnabled });
   }
+
+  sendHumanHandoff(data: { jid: string; clientName: string; timestamp: string }) {
+    this.server.emit('human-handoff', data);
+  }
 }
