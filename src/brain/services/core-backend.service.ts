@@ -732,6 +732,20 @@ export class CoreBackendService {
     }
   }
 
+  /**
+   * Analiza una conversación parada y propone un mensaje de reactivación.
+   * Endpoint Core: POST /api/v1/webhook/revive-lead
+   */
+  async reviveLead(phone: string, companyId: string) {
+    try {
+      const response = await this.client.post('/api/v1/webhook/revive-lead', { phone, companyId });
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Failed to revive lead for phone ${phone}`, error);
+      throw error;
+    }
+  }
+
   getDebugInfo() {
     return {
       useMock: this.useMock,

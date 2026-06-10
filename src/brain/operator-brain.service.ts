@@ -17,6 +17,7 @@ import { MarkActionDoneTool } from './tools/operator/mark-action-done.tool';
 import { SearchPropertiesTool } from './tools/search-properties.tool';
 import { SearchContactsTool } from './tools/operator/search-contacts.tool';
 import { SendWhatsAppToContactTool } from './tools/operator/send-whatsapp-to-contact.tool';
+import { ReviveConversationTool } from './tools/operator/revive-conversation.tool';
 
 /**
  * OperatorBrainService — AI assistant for internal operators (employees).
@@ -42,6 +43,7 @@ export class OperatorBrainService {
     private readonly searchPropertiesTool: SearchPropertiesTool,
     private readonly searchContactsTool: SearchContactsTool,
     private readonly sendWhatsAppToContactTool: SendWhatsAppToContactTool,
+    private readonly reviveConversationTool: ReviveConversationTool,
   ) {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
 
@@ -81,6 +83,7 @@ export class OperatorBrainService {
               this.searchPropertiesTool.declaration,
               this.searchContactsTool.declaration,
               this.sendWhatsAppToContactTool.declaration,
+              this.reviveConversationTool.declaration,
             ],
           },
         ],
@@ -186,6 +189,13 @@ export class OperatorBrainService {
             case 'send_whatsapp_to_contact':
               toolResult = await this.sendWhatsAppToContactTool.execute(
                 call.args as any,
+              );
+              break;
+
+            case 'revive_conversation':
+              toolResult = await this.reviveConversationTool.execute(
+                call.args as any,
+                { companyId: operator.companyId },
               );
               break;
 
